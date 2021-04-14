@@ -37,16 +37,16 @@ pub struct Server {
     match_idx: Vec<i64>,        // for each server, highest log index that matches
 
     // COMMUNICATION CHANNELS
-    txs: Vec<Sender<Box<dyn RPC>>>,      // senders for each other server
-    rxs: Vec<Receiver<Box<dyn RPC>>>,    // receivers for each other server
+    txs: Vec<Sender<RPC>>,      // senders for each other server
+    rxs: Vec<Receiver<RPC>>,    // receivers for each other server
 }
 
 impl Server {
     pub fn new(
         id: i32, 
         running: &Arc<AtomicBool>,
-        txs: Vec<Sender<Box<dyn RPC>>>,
-        rxs: Vec<Receiver<Box<dyn RPC>>>) -> Server {
+        txs: Vec<Sender<RPC>>,
+        rxs: Vec<Receiver<RPC>>) -> Server {
         Server {
             id: id,
             curr_term: 0,
