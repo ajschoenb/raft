@@ -21,6 +21,12 @@ pub enum RPC {
         term: i64,
         result: bool,
     },
+    ClientRequest {
+        id: i64,
+    },
+    ClientResponse {
+        id: i64,
+    },
 }
 
 
@@ -30,7 +36,8 @@ pub fn make_append_entries(
     prev_log_idx: i64,
     prev_log_term: i64,
     // entries: Vec<LogEntry>
-    leader_commit_idx: i64) -> RPC {
+    leader_commit_idx: i64,
+) -> RPC {
     RPC::AppendEntries {
         term: term,
         leader_id: leader_id,
@@ -45,7 +52,8 @@ pub fn make_request_vote(
     term: i64,
     candidate_id: i32,
     last_log_idx: i64,
-    last_log_term: i64) -> RPC {
+    last_log_term: i64,
+) -> RPC {
     RPC::RequestVote {
         term: term,
         candidate_id: candidate_id,
@@ -56,9 +64,26 @@ pub fn make_request_vote(
 
 pub fn make_response(
     term: i64,
-    result: bool) -> RPC {
+    result: bool,
+) -> RPC {
     RPC::Response {
         term: term,
         result: result,
+    }
+}
+
+pub fn make_client_request(
+    id: i64,
+) -> RPC {
+    RPC::ClientRequest {
+        id: id,
+    }
+}
+
+pub fn make_client_response(
+    id: i64,
+) -> RPC {
+    RPC::ClientResponse {
+        id: id,
     }
 }

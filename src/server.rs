@@ -1,7 +1,8 @@
+use std::collections::HashMap;
 use std::sync::mpsc::{Sender, Receiver};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use crate::rpc::RPC;
+use crate::rpc::*;
 
 ///
 /// ServerState
@@ -37,16 +38,21 @@ pub struct Server {
     match_idx: Vec<i64>,        // for each server, highest log index that matches
 
     // COMMUNICATION CHANNELS
-    txs: Vec<Sender<RPC>>,      // senders for each other server
-    rxs: Vec<Receiver<RPC>>,    // receivers for each other server
+    s_txs: HashMap<i32, Sender<RPC>>,      // senders for each other server
+    s_rxs: HashMap<i32, Receiver<RPC>>,    // receivers for each other server
+    c_txs: HashMap<i32, Sender<RPC>>,      // senders for each client
+    c_rxs: HashMap<i32, Receiver<RPC>>,    // receivers for each client
 }
 
 impl Server {
     pub fn new(
         id: i32, 
         running: &Arc<AtomicBool>,
-        txs: Vec<Sender<RPC>>,
-        rxs: Vec<Receiver<RPC>>) -> Server {
+        s_txs: HashMap<i32, Sender<RPC>>,
+        s_rxs: HashMap<i32, Receiver<RPC>>,
+        c_txs: HashMap<i32, Sender<RPC>>,
+        c_rxs: HashMap<i32, Receiver<RPC>>,
+    ) -> Server {
         Server {
             id: id,
             curr_term: 0,
@@ -58,8 +64,10 @@ impl Server {
             applied_idx: 0,
             next_idx: vec![],
             match_idx: vec![],
-            txs: txs,
-            rxs: rxs,
+            s_txs: s_txs,
+            s_rxs: s_rxs,
+            c_txs: c_txs,
+            c_rxs: c_rxs,
         }
     }
 
