@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::time::Duration;
 use std::sync::mpsc::{Sender, Receiver};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -22,7 +23,7 @@ pub enum ServerState {
 #[derive(Debug)]
 pub struct Server {
     // PERSISTENT STATE FOR ALL SERVERS
-    pub id: i32,               // the index of this server
+    pub id: i32,                // the index of this server
     curr_term: i64,             // the current term
     vote: i32,                  // who received vote in current term
     // log: Log,                // local log
@@ -72,6 +73,38 @@ impl Server {
     }
 
     pub fn run(&mut self) {
-        println!("server {} running", self.id);
+        for (_, tx) in &self.s_txs {
+            tx.send(make_client_request(self.id)).unwrap();
+        }
+        for (_, tx) in &self.c_txs {
+            tx.send(make_client_request(self.id)).unwrap();
+        }
+        for (&i, rx) in &self.s_rxs {
+            match rx.recv_timeout(Duration::from_secs(1)) {
+                Ok(RPC::ClientRequest { id }) => {
+                    assert_eq!(id, i);
+                },
+                Ok(_) => {
+                    panic!("server {} got a bad RPC from server {}", self.id, i);
+                },
+                Err(_) => {
+                    panic!("server {} failed to get an RPC from server {}", self.id, i);
+                },
+            }
+        }
+        for (&i, rx) in &self.c_rxs {
+            match rx.recv_timeout(Duration::from_secs(1)) {
+                Ok(RPC::ClientRequest { id }) => {
+                    assert_eq!(id, i);
+                },
+                Ok(_) => {
+                    panic!("server {} got a bad RPC from client {}", self.id, i);
+                },
+                Err(_) => {
+                    panic!("server {} failed to get an RPC from client {}", self.id, i);
+                },
+            }
+        }
+        println!("server {} passed all tests", self.id);
     }
 }

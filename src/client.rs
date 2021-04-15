@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::time::Duration;
 use std::sync::mpsc::{Sender, Receiver};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -35,6 +36,22 @@ impl Client {
     }
 
     pub fn run(&mut self) {
-        println!("client {} running with {} requests", self.id, self.n_reqs);
+        for (_, tx) in &self.txs {
+            tx.send(make_client_request(self.id)).unwrap();
+        }
+        for (&i, rx) in &self.rxs {
+            match rx.recv_timeout(Duration::from_secs(1)) {
+                Ok(RPC::ClientRequest { id }) => {
+                    assert_eq!(id, i);
+                },
+                Ok(_) => {
+                    panic!("client {} got a bad RPC from server {}", self.id, i);
+                },
+                Err(_) => {
+                    panic!("client {} failed to get an RPC from server {}", self.id, i);
+                },
+            }
+        }
+        println!("client {} passed all tests", self.id);
     }
 }

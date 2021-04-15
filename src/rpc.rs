@@ -22,10 +22,10 @@ pub enum RPC {
         result: bool,
     },
     ClientRequest {
-        id: i64,
+        id: i32,
     },
     ClientResponse {
-        id: i64,
+        id: i32,
     },
 }
 
@@ -73,7 +73,7 @@ pub fn make_response(
 }
 
 pub fn make_client_request(
-    id: i64,
+    id: i32,
 ) -> RPC {
     RPC::ClientRequest {
         id: id,
@@ -81,7 +81,7 @@ pub fn make_client_request(
 }
 
 pub fn make_client_response(
-    id: i64,
+    id: i32,
 ) -> RPC {
     RPC::ClientResponse {
         id: id,
