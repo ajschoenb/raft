@@ -15,7 +15,7 @@ pub struct Client {
     n_reqs: i64,
     running: Arc<AtomicBool>,
     txs: HashMap<i32, Sender<RPC>>,
-    rxs: HashMap<i32, Receiver<RPC>>,
+    rx: Receiver<RPC>,
 }
 
 impl Client {
@@ -24,14 +24,14 @@ impl Client {
         n_reqs: i64,
         running: &Arc<AtomicBool>,
         txs: HashMap<i32, Sender<RPC>>,
-        rxs: HashMap<i32, Receiver<RPC>>,
+        rx: Receiver<RPC>,
     ) -> Client {
         Client {
             id: id,
             n_reqs: n_reqs,
             running: running.clone(),
             txs: txs,
-            rxs: rxs,
+            rx: rx,
         }
     }
 
@@ -39,17 +39,16 @@ impl Client {
         for (_, tx) in &self.txs {
             tx.send(make_client_request(self.id)).unwrap();
         }
-        for (&i, rx) in &self.rxs {
-            match rx.recv_timeout(Duration::from_secs(1)) {
-                Ok(RPC::ClientRequest { id }) => {
-                    assert_eq!(id, i);
+        for _ in 0..self.txs.len() {
+            match self.rx.recv_timeout(Duration::from_secs(1)) {
+                Ok(RPC::ClientRequest { id: _ }) => {
                 },
                 Ok(_) => {
-                    panic!("client {} got a bad RPC from server {}", self.id, i);
+                    panic!("client {} got a bad RPC", self.id);
                 },
                 Err(_) => {
-                    panic!("client {} failed to get an RPC from server {}", self.id, i);
-                },
+                    panic!("client {} failed to get enough RPCs", self.id);
+                }
             }
         }
         println!("client {} passed all tests", self.id);

@@ -39,10 +39,9 @@ pub struct Server {
     match_idx: Vec<i64>,        // for each server, highest log index that matches
 
     // COMMUNICATION CHANNELS
-    s_txs: HashMap<i32, Sender<RPC>>,      // senders for each other server
-    s_rxs: HashMap<i32, Receiver<RPC>>,    // receivers for each other server
-    c_txs: HashMap<i32, Sender<RPC>>,      // senders for each client
-    c_rxs: HashMap<i32, Receiver<RPC>>,    // receivers for each client
+    s_txs: HashMap<i32, Sender<RPC>>,       // senders for each other server
+    c_txs: HashMap<i32, Sender<RPC>>,       // senders for each client
+    rx: Receiver<RPC>,                      // receiver for this server
 }
 
 impl Server {
@@ -50,9 +49,8 @@ impl Server {
         id: i32, 
         running: &Arc<AtomicBool>,
         s_txs: HashMap<i32, Sender<RPC>>,
-        s_rxs: HashMap<i32, Receiver<RPC>>,
         c_txs: HashMap<i32, Sender<RPC>>,
-        c_rxs: HashMap<i32, Receiver<RPC>>,
+        rx: Receiver<RPC>,
     ) -> Server {
         Server {
             id: id,
@@ -66,9 +64,8 @@ impl Server {
             next_idx: vec![],
             match_idx: vec![],
             s_txs: s_txs,
-            s_rxs: s_rxs,
             c_txs: c_txs,
-            c_rxs: c_rxs,
+            rx: rx,
         }
     }
 
@@ -79,30 +76,16 @@ impl Server {
         for (_, tx) in &self.c_txs {
             tx.send(make_client_request(self.id)).unwrap();
         }
-        for (&i, rx) in &self.s_rxs {
-            match rx.recv_timeout(Duration::from_secs(1)) {
-                Ok(RPC::ClientRequest { id }) => {
-                    assert_eq!(id, i);
+        for _ in 0..(self.s_txs.len() + self.c_txs.len()) {
+            match self.rx.recv_timeout(Duration::from_secs(1)) {
+                Ok(RPC::ClientRequest { id: _ }) => {
                 },
                 Ok(_) => {
-                    panic!("server {} got a bad RPC from server {}", self.id, i);
+                    panic!("server {} got a bad RPC", self.id);
                 },
                 Err(_) => {
-                    panic!("server {} failed to get an RPC from server {}", self.id, i);
-                },
-            }
-        }
-        for (&i, rx) in &self.c_rxs {
-            match rx.recv_timeout(Duration::from_secs(1)) {
-                Ok(RPC::ClientRequest { id }) => {
-                    assert_eq!(id, i);
-                },
-                Ok(_) => {
-                    panic!("server {} got a bad RPC from client {}", self.id, i);
-                },
-                Err(_) => {
-                    panic!("server {} failed to get an RPC from client {}", self.id, i);
-                },
+                    panic!("server {} failed to get enough RPCs", self.id);
+                }
             }
         }
         println!("server {} passed all tests", self.id);

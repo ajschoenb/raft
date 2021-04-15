@@ -14,93 +14,103 @@ use rpc::*;
 use server::Server;
 use client::Client;
 
-fn init_channels(n_servers: i32, n_clients: i32) -> (Vec<HashMap<i32, (Sender<RPC>, Receiver<RPC>)>>, Vec<HashMap<i32, (Sender<RPC>, Receiver<RPC>)>>, Vec<HashMap<i32, (Sender<RPC>, Receiver<RPC>)>>) {
+///
+/// init_channels
+/// Initializes communication channels
+/// returns: (ss_senders, sc_senders, cs_senders, s_recvers, c_recvers)
+///
+fn init_channels(n_servers: i32, n_clients: i32) -> (Vec<HashMap<i32, Sender<RPC>>>, Vec<HashMap<i32, Sender<RPC>>>, Vec<HashMap<i32, Sender<RPC>>>, Vec<Receiver<RPC>>, Vec<Receiver<RPC>>) {
     // for each server, build a channel to every other server and every client
-    let mut ss_channels = vec![];
-    let mut sc_channels = vec![];
-    let mut cs_channels = vec![];
+    let mut s_channels = vec![];
+    let mut c_channels = vec![];
+    let mut ss_senders = vec![];
+    let mut sc_senders = vec![];
+    let mut cs_senders = vec![];
 
     for _ in 0..n_servers {
-        ss_channels.push(HashMap::new());
-        sc_channels.push(HashMap::new());
+        ss_senders.push(HashMap::new());
+        sc_senders.push(HashMap::new());
+        s_channels.push(channel());
     }
     for _ in 0..n_clients {
-        cs_channels.push(HashMap::new());
+        cs_senders.push(HashMap::new());
+        c_channels.push(channel());
     }
 
     for i in 0..n_servers {
         for j in 0..n_servers {
             if i != j {
                 // build communication between server i and server j
-                let (txi, rxj) = channel();
-                let (txj, rxi) = channel();
-                ss_channels[i as usize].insert(j, (txi, rxi));
-                ss_channels[j as usize].insert(i, (txj, rxj));
+                let txi = s_channels[i as usize].0.clone();
+                let txj = s_channels[j as usize].0.clone();
+                ss_senders[i as usize].insert(j, txj);
+                ss_senders[j as usize].insert(i, txi);
             }
         }
         for j in 0..n_clients {
             // build communication between server i and client j
-            let (txi, rxj) = channel();
-            let (txj, rxi) = channel();
-            sc_channels[i as usize].insert(j, (txi, rxi));
-            cs_channels[j as usize].insert(i, (txj, rxj));
+            let txi = s_channels[i as usize].0.clone();
+            let txj = c_channels[j as usize].0.clone();
+            sc_senders[i as usize].insert(j, txj);
+            cs_senders[j as usize].insert(i, txi);
         }
     }
-    (ss_channels, sc_channels, cs_channels)
+
+    let s_recvers = s_channels.into_iter().map(|(_, rx)| rx).collect();
+    let c_recvers = c_channels.into_iter().map(|(_, rx)| rx).collect();
+    (ss_senders, sc_senders, cs_senders, s_recvers, c_recvers)
 }
 
-fn init_servers(n: i32, running: &Arc<AtomicBool>, mut ss_channels: Vec<HashMap<i32, (Sender<RPC>, Receiver<RPC>)>>, mut sc_channels: Vec<HashMap<i32, (Sender<RPC>, Receiver<RPC>)>>) -> Vec<Server> {
+///
+/// init_servers
+/// Initializes servers
+/// returns: (servers)
+///
+fn init_servers(n: i32, running: &Arc<AtomicBool>, mut ss_senders: Vec<HashMap<i32, Sender<RPC>>>, mut sc_senders: Vec<HashMap<i32, Sender<RPC>>>, mut s_recvers: Vec<Receiver<RPC>>) -> Vec<Server> {
     let mut servers = vec![];
 
     for i in 0..n {
-        let mut ss_map = ss_channels.remove(0);
-        let mut sc_map = sc_channels.remove(0);
-        let mut s_txs = HashMap::new();
-        let mut s_rxs = HashMap::new();
-        let mut c_txs = HashMap::new();
-        let mut c_rxs = HashMap::new();
-        for (j, ch) in ss_map.drain() {
-            s_txs.insert(j, ch.0);
-            s_rxs.insert(j, ch.1);
-        }
-        for (j, ch) in sc_map.drain() {
-            c_txs.insert(j, ch.0);
-            c_rxs.insert(j, ch.1);
-        }
+        let s_txs = ss_senders.remove(0);
+        let c_txs = sc_senders.remove(0);
+        let rx = s_recvers.remove(0);
         let s = Server::new(i,
                             running,
                             s_txs,
-                            s_rxs,
                             c_txs,
-                            c_rxs);
+                            rx);
         servers.push(s);
     }
 
     servers
 }
 
-fn init_clients(n: i32, n_reqs: i64, running: &Arc<AtomicBool>, mut cs_channels: Vec<HashMap<i32, (Sender<RPC>, Receiver<RPC>)>>) -> Vec<Client> {
+///
+/// init_clients
+/// Initializes clients
+/// returns: (clients)
+///
+fn init_clients(n: i32, n_reqs: i64, running: &Arc<AtomicBool>, mut cs_senders: Vec<HashMap<i32, Sender<RPC>>>, mut c_recvers: Vec<Receiver<RPC>>) -> Vec<Client> {
     let mut clients = vec![];
 
     for i in 0..n {
-        let mut cs_map = cs_channels.remove(0);
-        let mut txs = HashMap::new();
-        let mut rxs = HashMap::new();
-        for (j, ch) in cs_map.drain() {
-            txs.insert(j, ch.0);
-            rxs.insert(j, ch.1);
-        }
+        let txs = cs_senders.remove(0);
+        let rx = c_recvers.remove(0);
         let c = Client::new(i,
                             n_reqs,
                             running,
                             txs,
-                            rxs);
+                            rx);
         clients.push(c);
     }
 
     clients
 }
 
+///
+/// launch
+/// Launches clients and servers
+/// returns: (handles)
+///
 fn launch(servers: Vec<Server>, clients: Vec<Client>) -> Vec<JoinHandle<()>> {
     let mut handles = vec![];
 
@@ -124,9 +134,9 @@ fn main() {
     let n_clients = 10;
     let n_reqs = 10;
     let running = Arc::new(AtomicBool::new(true));
-    let (ss_channels, sc_channels, cs_channels) = init_channels(n_servers, n_clients);
-    let servers = init_servers(n_servers, &running.clone(), ss_channels, sc_channels);
-    let clients = init_clients(n_clients, n_reqs, &running.clone(), cs_channels);
+    let (ss_senders, sc_senders, cs_senders, s_recvers, c_recvers) = init_channels(n_servers, n_clients);
+    let servers = init_servers(n_servers, &running.clone(), ss_senders, sc_senders, s_recvers);
+    let clients = init_clients(n_clients, n_reqs, &running.clone(), cs_senders, c_recvers);
     let handles = launch(servers, clients);
     for h in handles {
         h.join().unwrap();
