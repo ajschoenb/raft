@@ -69,7 +69,7 @@ impl Server {
         }
     }
 
-    pub fn run(&mut self) {
+    pub fn test_comms(&self) {
         for (_, tx) in &self.s_txs {
             tx.send(make_client_request(self.id)).unwrap();
         }
@@ -89,5 +89,18 @@ impl Server {
             }
         }
         println!("server {} passed all tests", self.id);
+    }
+
+    pub fn run(&mut self) {
+        self.test_comms();
+
+        // MAIN LOOP
+        // while running {
+        //      increment the "timer" and check for election timeout
+        //      try_recv a message
+        //      process the message
+        //      BLOCKING IS BAD, DON'T DO IT
+        //      YOU NEED TO KEEP LOOPING BECAUSE OF HEARTBEATS
+        // }
     }
 }

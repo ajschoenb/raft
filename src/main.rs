@@ -1,8 +1,8 @@
+extern crate ctrlc;
 use std::collections::HashMap;
 use std::sync::mpsc::{channel, Sender, Receiver};
 use std::thread;
 use std::thread::JoinHandle;
-use std::time::Duration;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -134,6 +134,12 @@ fn main() {
     let n_clients = 10;
     let n_reqs = 10;
     let running = Arc::new(AtomicBool::new(true));
+    let r = running.clone();
+    ctrlc::set_handler(move || {
+        println!("CTRL-C");
+        r.store(false, Ordering::SeqCst);
+    }).expect("error setting signal handler");
+
     let (ss_senders, sc_senders, cs_senders, s_recvers, c_recvers) = init_channels(n_servers, n_clients);
     let servers = init_servers(n_servers, &running.clone(), ss_senders, sc_senders, s_recvers);
     let clients = init_clients(n_clients, n_reqs, &running.clone(), cs_senders, c_recvers);

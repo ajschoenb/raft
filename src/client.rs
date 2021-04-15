@@ -35,7 +35,7 @@ impl Client {
         }
     }
 
-    pub fn run(&mut self) {
+    pub fn test_comms(&self) {
         for (_, tx) in &self.txs {
             tx.send(make_client_request(self.id)).unwrap();
         }
@@ -52,5 +52,15 @@ impl Client {
             }
         }
         println!("client {} passed all tests", self.id);
+    }
+
+    pub fn run(&mut self) {
+        self.test_comms();
+
+        // MAIN LOOP
+        // while running {
+        //      send a request to the leader (might need to discover leader first)
+        //      wait for response - if failure or timeout then retry request
+        // }
     }
 }
