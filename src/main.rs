@@ -1,4 +1,5 @@
 extern crate ctrlc;
+extern crate stderrlog;
 use std::collections::HashMap;
 use std::sync::mpsc::{channel, Sender, Receiver};
 use std::thread;
@@ -9,7 +10,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 pub mod server;
 pub mod client;
 pub mod rpc;
-pub mod log;
+pub mod raftlog;
 
 use rpc::*;
 use server::Server;
@@ -136,6 +137,14 @@ fn launch(servers: Vec<Server>, clients: Vec<Client>) -> Vec<JoinHandle<()>> {
 }
 
 fn main() {
+    stderrlog::new()
+            .module(module_path!())
+            .quiet(false)
+            .timestamp(stderrlog::Timestamp::Millisecond)
+            .verbosity(3)
+            .init()
+            .unwrap();
+
     let n_servers = 5;
     let n_clients = 10;
     let n_reqs = 10;

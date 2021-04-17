@@ -1,3 +1,4 @@
+extern crate log;
 use std::collections::HashMap;
 use std::time::Duration;
 use std::sync::mpsc::{Sender, Receiver};
@@ -5,8 +6,9 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::cmp::min;
 use rand::{thread_rng, Rng};
+use log::*;
 use crate::rpc::*;
-use crate::log::*;
+use crate::raftlog::*;
 
 static BASE_ELECT_TIMEOUT: i32 = 100000;
 static PING_RATE: i32 = 5000;
@@ -39,7 +41,7 @@ pub struct Server {
     vote: i32,
 
     // the local log
-    log: Log,
+    log: RaftLog,
 
     // whether the simulation is still running
     running: Arc<AtomicBool>,
@@ -99,7 +101,7 @@ impl Server {
             id: id,
             curr_term: 0,
             vote: -1,
-            log: Log::new(lpath),
+            log: RaftLog::new(lpath),
             running: running.clone(),
             state: ServerState::Follower,
             commit_idx: 0,
@@ -146,7 +148,37 @@ impl Server {
         self.s_txs[&id].send(rpc).unwrap();
     }
 
-    pub fn handle_recv_append_entries(&mut self, id: i32, term: i64, prev_log_idx: usize, prev_log_term: i64, entries: Vec<LogEntry>, leader_commit_idx: usize) {
+    pub fn become_follower(&mut self) {
+        if self.state != ServerState::Follower {
+            info!("server {} becoming follower", self.id);
+        }
+        self.vote = -1;
+        self.state = ServerState::Follower;
+    }
+
+    pub fn become_candidate(&mut self) {
+        if self.state != ServerState::Candidate {
+            info!("server {} becoming candidate", self.id);
+        }
+        self.curr_term += 1;
+        self.vote = self.id;
+        self.votes_recved = vec![];
+        self.elect_timer = 0;
+        self.state = ServerState::Candidate;
+    }
+
+    pub fn become_leader(&mut self) {
+        if self.state != ServerState::Leader {
+            info!("server {} becoming leader", self.id);
+        }
+        let last_log_idx = self.log.len() - 1;
+        self.elect_timer = 0;
+        self.next_idx = vec![last_log_idx, self.s_txs.len()];
+        self.match_idx = vec![0, self.s_txs.len()];
+        self.state = ServerState::Leader;
+    }
+
+    pub fn handle_recv_append_entries(&mut self, id: i32, term: i64, prev_log_idx: usize, prev_log_term: i64, entries: Vec<RaftLogEntry>, leader_commit_idx: usize) {
         // reset election timer
         self.elect_timer = 0;
 
@@ -205,9 +237,9 @@ impl Server {
         let self_last_log_term = self.log.get_last().term;
         let self_last_log_idx = self.log.len() - 1;
         let up_to_date = (self_last_log_term < last_log_term) || (self_last_log_term == last_log_term && self_last_log_idx <= last_log_idx);
-        let success = (term > self.curr_term) && ((self.vote == -1 || self.vote == id)) && up_to_date;
+        let success = (term >= self.curr_term) && ((self.vote == -1 || self.vote == id)) && up_to_date;
         if success {
-            println!("server {} state {:?} voted for {}", self.id, self.state, id);
+            info!("server {} state {:?} voted for {}", self.id, self.state, id);
             self.vote = id;
         }
 
@@ -216,62 +248,80 @@ impl Server {
         self.send_server(id, response);
     }
 
-    pub fn become_follower(&mut self) {
-        println!("server {} becoming follower", self.id);
-        self.vote = -1;
-        self.state = ServerState::Follower;
-    }
+    pub fn recv_rpc(&mut self) {
+        loop {
+            match self.rx.try_recv() {
+                Ok(RPC::AppendEntries {
+                    id,
+                    term,
+                    prev_log_idx,
+                    prev_log_term,
+                    entries,
+                    leader_commit_idx,
+                }) => {
+                    if term > self.curr_term {
+                        self.curr_term = term;
+                    }
 
-    pub fn become_candidate(&mut self) {
-        println!("server {} becoming candidate", self.id);
-        self.curr_term += 1;
-        self.vote = self.id;
-        self.votes_recved = vec![];
-        self.elect_timer = 0;
-        self.state = ServerState::Candidate;
-    }
-
-    pub fn become_leader(&mut self) {
-        println!("server {} becoming leader", self.id);
-        let last_log_idx = self.log.len() - 1;
-        self.elect_timer = 0;
-        self.next_idx = vec![last_log_idx, self.s_txs.len()];
-        self.match_idx = vec![0, self.s_txs.len()];
-        self.state = ServerState::Leader;
+                    // the only place an AppendEntries can come from is the leader
+                    self.become_follower();
+                    self.handle_recv_append_entries(id, term, prev_log_idx, prev_log_term, entries, leader_commit_idx);
+                },
+                Ok(RPC::RequestVote {
+                    id,
+                    term,
+                    last_log_idx,
+                    last_log_term,
+                }) => {
+                    if term > self.curr_term {
+                        self.curr_term = term;
+                        self.become_follower();
+                    }
+                    self.handle_recv_request_vote(id, term, last_log_idx, last_log_term);
+                },
+                Ok(RPC::ClientRequest {
+                    id: _,
+                }) => {
+                    println!("not sure what to do when client requests from non-leader");
+                },
+                Ok(RPC::RequestVoteResponse {
+                    id,
+                    term,
+                    vote,
+                }) => {
+                    if term > self.curr_term {
+                        self.curr_term = term;
+                        self.become_follower();
+                    } else if self.state == ServerState::Candidate {
+                        if vote && !self.votes_recved.iter().any(|&i| i == id) {
+                            self.votes_recved.push(id);
+                            info!("server {} recved vote from {}, now have {} votes", self.id, id, self.votes_recved.len());
+                        }
+                        if self.votes_recved.len() >= self.votes_needed as usize {
+                            self.become_leader();
+                        }
+                    } else {
+                        info!("server {} recved vote, but not candidate", self.id);
+                    }
+                },
+                Ok(RPC::AppendEntriesResponse {
+                    id,
+                    term,
+                    result,
+                }) => {
+                },
+                Ok(rpc) => {
+                    info!("server {} got a bad RPC {:?}", self.id, rpc);
+                },
+                Err(_) => {
+                    // no need to panic, we just didn't have a message queued up
+                    break;
+                },
+            }
+        }
     }
 
     pub fn tick_follower(&mut self) {
-        match self.rx.try_recv() {
-            Ok(RPC::AppendEntries {
-                id,
-                term,
-                prev_log_idx,
-                prev_log_term,
-                entries,
-                leader_commit_idx,
-            }) => {
-                self.handle_recv_append_entries(id, term, prev_log_idx, prev_log_term, entries, leader_commit_idx);
-            },
-            Ok(RPC::RequestVote {
-                id,
-                term,
-                last_log_idx,
-                last_log_term,
-            }) => {
-                self.handle_recv_request_vote(id, term, last_log_idx, last_log_term);
-            },
-            Ok(RPC::ClientRequest {
-                id: _,
-            }) => {
-                println!("not sure what to do when client requests from non-leader");
-            },
-            Ok(rpc) => {
-                // println!("server {} got a bad RPC {:?}", self.id, rpc);
-            },
-            Err(_) => {
-                // no need to panic, we just didn't have a message queued up
-            },
-        }
     }
 
     pub fn tick_candidate(&mut self) {
@@ -283,66 +333,6 @@ impl Server {
             for (_, tx) in self.s_txs.iter().filter(|(i, _)| !self.votes_recved.contains(i)) {
                 tx.send(request.clone()).unwrap();
             }
-        }
-
-        match self.rx.try_recv() {
-            Ok(RPC::AppendEntries {
-                id,
-                term,
-                prev_log_idx,
-                prev_log_term,
-                entries,
-                leader_commit_idx,
-            }) => {
-                if term > self.curr_term {
-                    self.curr_term = term;
-                }
-
-                // if a candidate receives an AppendEntries RPC, they must have lost the election
-                self.become_follower();
-                self.handle_recv_append_entries(id, term, prev_log_idx, prev_log_term, entries, leader_commit_idx);
-            },
-            Ok(RPC::RequestVote {
-                id,
-                term,
-                last_log_idx,
-                last_log_term,
-            }) => {
-                if term > self.curr_term {
-                    self.curr_term = term;
-                    self.become_follower();
-                }
-                self.handle_recv_request_vote(id, term, last_log_idx, last_log_term);
-            },
-            Ok(RPC::ClientRequest {
-                id: _,
-            }) => {
-                println!("not sure what to do when client requests from non-leader");
-            },
-            Ok(RPC::RequestVoteResponse {
-                id,
-                term,
-                vote,
-            }) => {
-                if term > self.curr_term {
-                    self.curr_term = term;
-                    self.become_follower();
-                } else {
-                    if vote && !self.votes_recved.iter().any(|&i| i == id) {
-                        self.votes_recved.push(id);
-                        println!("server {} recved vote from {}, now have {} votes", self.id, id, self.votes_recved.len());
-                    }
-                    if self.votes_recved.len() >= self.votes_needed as usize {
-                        self.become_leader();
-                    }
-                }
-            },
-            Ok(rpc) => {
-                println!("server {} got a bad RPC {:?}", self.id, rpc);
-            },
-            Err(_) => {
-                // no need to panic, we just didn't have a message queued up
-            },
         }
     }
 
@@ -375,31 +365,32 @@ impl Server {
         // }
         while self.is_running() {
             // if commit_idx > applied_idx, increment applied_idx and apply log[applied_idx]
-            if self.commit_idx > self.applied_idx {
+            while self.commit_idx > self.applied_idx {
                 self.applied_idx += 1;
                 self.log.apply(self.applied_idx);
             }
 
+            // check for election timeout
             self.elect_timer += 1;
             if self.elect_timer >= self.elect_timeout {
-                // election timeout, become a candidate
                 self.become_candidate();
-                // println!("server {} election timeout, becoming a candidate", self.id);
             }
+
+            // tick based on state
             match self.state {
                 ServerState::Follower => {
                     self.tick_follower();
                 },
                 ServerState::Candidate => {
-                    // println!("tick candidate");
                     self.tick_candidate();
                 },
                 ServerState::Leader => {
-                    // println!("tick leader");
-                    // self.running.store(false, Ordering::SeqCst);
                     self.tick_leader();
                 },
             }
+
+            // receive and respond to incoming RPCs
+            self.recv_rpc();
         }
     }
 }

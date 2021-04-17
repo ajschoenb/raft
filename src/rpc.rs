@@ -1,6 +1,6 @@
 extern crate serde;
 extern crate serde_json;
-use crate::log::LogEntry;
+use crate::raftlog::RaftLogEntry;
 
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
 pub enum RPC {
@@ -9,7 +9,7 @@ pub enum RPC {
         term: i64,
         prev_log_idx: usize,
         prev_log_term: i64,
-        entries: Vec<LogEntry>,
+        entries: Vec<RaftLogEntry>,
         leader_commit_idx: usize,
     },
     RequestVote {
@@ -41,7 +41,7 @@ pub fn make_append_entries(
     term: i64,
     prev_log_idx: usize,
     prev_log_term: i64,
-    entries: Vec<LogEntry>,
+    entries: Vec<RaftLogEntry>,
     leader_commit_idx: usize,
 ) -> RPC {
     RPC::AppendEntries {
