@@ -9,6 +9,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 pub mod server;
 pub mod client;
 pub mod rpc;
+pub mod log;
 
 use rpc::*;
 use server::Server;
@@ -73,8 +74,13 @@ fn init_servers(n: i32, running: &Arc<AtomicBool>, mut ss_senders: Vec<HashMap<i
         let s_txs = ss_senders.remove(0);
         let c_txs = sc_senders.remove(0);
         let rx = s_recvers.remove(0);
+        let logpathbase = shellexpand::tilde("~/raft");
+        let lpath = format!("{}/server{}.log", logpathbase, i);
+        println!("{}", lpath);
         let s = Server::new(i,
                             running,
+                            lpath,
+                            n,
                             s_txs,
                             c_txs,
                             rx);

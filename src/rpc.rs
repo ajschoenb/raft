@@ -1,25 +1,32 @@
 extern crate serde;
 extern crate serde_json;
+use crate::log::LogEntry;
 
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
 pub enum RPC {
     AppendEntries {
+        id: i32,
         term: i64,
-        leader_id: i32,
-        prev_log_idx: i64,
+        prev_log_idx: usize,
         prev_log_term: i64,
-        // entries: Vec<LogEntry>,
-        leader_commit_idx: i64,
+        entries: Vec<LogEntry>,
+        leader_commit_idx: usize,
     },
     RequestVote {
+        id: i32,
         term: i64,
-        candidate_id: i32,
-        last_log_idx: i64,
+        last_log_idx: usize,
         last_log_term: i64,
     },
-    Response {
+    AppendEntriesResponse {
+        id: i32,
         term: i64,
         result: bool,
+    },
+    RequestVoteResponse {
+        id: i32,
+        term: i64,
+        vote: bool,
     },
     ClientRequest {
         id: i32,
@@ -29,46 +36,59 @@ pub enum RPC {
     },
 }
 
-
 pub fn make_append_entries(
+    id: i32,
     term: i64,
-    leader_id: i32,
-    prev_log_idx: i64,
+    prev_log_idx: usize,
     prev_log_term: i64,
-    // entries: Vec<LogEntry>
-    leader_commit_idx: i64,
+    entries: Vec<LogEntry>,
+    leader_commit_idx: usize,
 ) -> RPC {
     RPC::AppendEntries {
+        id: id,
         term: term,
-        leader_id: leader_id,
         prev_log_idx: prev_log_idx,
         prev_log_term: prev_log_term,
-        // entries: entries,
+        entries: entries,
         leader_commit_idx: leader_commit_idx,
     }
 }
 
 pub fn make_request_vote(
+    id: i32,
     term: i64,
-    candidate_id: i32,
-    last_log_idx: i64,
+    last_log_idx: usize,
     last_log_term: i64,
 ) -> RPC {
     RPC::RequestVote {
+        id: id,
         term: term,
-        candidate_id: candidate_id,
         last_log_idx: last_log_idx,
         last_log_term: last_log_term,
     }
 }
 
-pub fn make_response(
+pub fn make_append_entries_response(
+    id: i32,
     term: i64,
     result: bool,
 ) -> RPC {
-    RPC::Response {
+    RPC::AppendEntriesResponse {
+        id: id,
         term: term,
         result: result,
+    }
+}
+
+pub fn make_request_vote_response(
+    id: i32,
+    term: i64,
+    vote: bool,
+) -> RPC {
+    RPC::RequestVoteResponse {
+        id: id,
+        term: term,
+        vote: vote,
     }
 }
 

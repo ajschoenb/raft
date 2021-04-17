@@ -55,7 +55,7 @@ impl Client {
     }
 
     pub fn run(&mut self) {
-        self.test_comms();
+        // self.test_comms();
 
         // MAIN LOOP
         // while running {
