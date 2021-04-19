@@ -21,6 +21,7 @@ pub enum RPC {
     AppendEntriesResponse {
         id: i32,
         term: i64,
+        idx: usize,
         result: bool,
     },
     RequestVoteResponse {
@@ -30,9 +31,12 @@ pub enum RPC {
     },
     ClientRequest {
         id: i32,
+        opid: i32,
     },
     ClientResponse {
         id: i32,
+        opid: i32,
+        success: bool,
     },
 }
 
@@ -71,11 +75,13 @@ pub fn make_request_vote(
 pub fn make_append_entries_response(
     id: i32,
     term: i64,
+    idx: usize,
     result: bool,
 ) -> RPC {
     RPC::AppendEntriesResponse {
         id: id,
         term: term,
+        idx: idx,
         result: result,
     }
 }
@@ -94,16 +100,22 @@ pub fn make_request_vote_response(
 
 pub fn make_client_request(
     id: i32,
+    opid: i32,
 ) -> RPC {
     RPC::ClientRequest {
         id: id,
+        opid: opid,
     }
 }
 
 pub fn make_client_response(
     id: i32,
+    opid: i32,
+    success: bool,
 ) -> RPC {
     RPC::ClientResponse {
         id: id,
+        opid: opid,
+        success: success,
     }
 }

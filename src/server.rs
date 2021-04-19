@@ -4,7 +4,7 @@ use std::time::Duration;
 use std::sync::mpsc::{Sender, Receiver};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::cmp::min;
+use std::cmp::{min, max};
 use rand::{thread_rng, Rng};
 use log::*;
 use crate::rpc::*;
@@ -108,8 +108,8 @@ impl Server {
             applied_idx: 0,
             votes_needed: n_servers / 2 + 1,
             votes_recved: vec![],
-            next_idx: vec![0, n_servers as usize - 1],
-            match_idx: vec![0, n_servers as usize - 1],
+            next_idx: vec![0; n_servers as usize],
+            match_idx: vec![0; n_servers as usize],
             elect_timeout: thread_rng().gen_range(BASE_ELECT_TIMEOUT..2 * BASE_ELECT_TIMEOUT),
             elect_timer: 0,
             s_txs: s_txs,
@@ -120,14 +120,14 @@ impl Server {
 
     pub fn test_comms(&self) {
         for (_, tx) in &self.s_txs {
-            tx.send(make_client_request(self.id)).unwrap();
+            tx.send(make_client_request(self.id, 0)).unwrap();
         }
         for (_, tx) in &self.c_txs {
-            tx.send(make_client_request(self.id)).unwrap();
+            tx.send(make_client_request(self.id, 0)).unwrap();
         }
         for _ in 0..(self.s_txs.len() + self.c_txs.len()) {
             match self.rx.recv_timeout(Duration::from_secs(1)) {
-                Ok(RPC::ClientRequest { id: _ }) => {
+                Ok(RPC::ClientRequest { id: _, opid: _ }) => {
                 },
                 Ok(_) => {
                     panic!("server {} got a bad RPC", self.id);
@@ -173,8 +173,8 @@ impl Server {
         }
         let last_log_idx = self.log.len() - 1;
         self.elect_timer = 0;
-        self.next_idx = vec![last_log_idx, self.s_txs.len()];
-        self.match_idx = vec![0, self.s_txs.len()];
+        self.next_idx.fill(last_log_idx + 1);
+        self.match_idx.fill(0);
         self.state = ServerState::Leader;
     }
 
@@ -182,6 +182,7 @@ impl Server {
         // reset election timer
         self.elect_timer = 0;
 
+        let mut last_new_entry_idx = prev_log_idx;
         // 1. reply false if term < curr_term
         // 2. reply false if no entry at prev_log_idx whose term matches prev_log_term
         let success = term >= self.curr_term && match self.log.get(prev_log_idx) {
@@ -192,7 +193,6 @@ impl Server {
             // 3. if an existing entry conflicts with a new one (same idx, diff terms) delete the
             // existing entry and all that follow it
             // 4. append any new entries not already in the log
-            let mut last_new_entry_idx = 0;
             for (i, entry) in entries.into_iter().enumerate() {
                 // prev_log_idx is the index of the entry immediately preceding the new ones
                 let idx = i + prev_log_idx + 1;
@@ -205,12 +205,13 @@ impl Server {
                             self.log.delete_from(idx);
                         } else {
                             assert_eq!(existing_entry.opid, entry.opid);
+                            last_new_entry_idx = idx;
                         }
                     },
                     None => {
                         // nothing there -> append entry
                         self.log.append(entry);
-                        last_new_entry_idx += 1;
+                        last_new_entry_idx = idx;
                     },
                 }
             }
@@ -223,7 +224,8 @@ impl Server {
         }
 
         // actually send a response
-        let response = make_append_entries_response(self.id, self.curr_term, success);
+        debug!("server {} handled AppendEntries? {}, last new entry idx {}", self.id, success, last_new_entry_idx);
+        let response = make_append_entries_response(self.id, self.curr_term, last_new_entry_idx, success);
         self.send_server(id, response);
     }
 
@@ -280,9 +282,25 @@ impl Server {
                     self.handle_recv_request_vote(id, term, last_log_idx, last_log_term);
                 },
                 Ok(RPC::ClientRequest {
-                    id: _,
+                    id,
+                    opid,
                 }) => {
-                    println!("not sure what to do when client requests from non-leader");
+                    let response: RPC;
+                    if self.state == ServerState::Leader {
+                        // process the request and send back the result
+                        let entry = RaftLogEntry::new(opid, self.curr_term);
+                        self.log.append(entry);
+                        assert_eq!(self.applied_idx, self.commit_idx);
+                        self.commit_idx += 1;
+                        self.log.apply(self.commit_idx);
+                        self.applied_idx += 1;
+
+                        response = make_client_response(self.id, opid, true);
+                    } else {
+                        // tell client that this isn't the leader so they can try someone else
+                        response = make_client_response(self.id, opid, false);
+                    }
+                    self.c_txs[&id].send(response).unwrap();
                 },
                 Ok(RPC::RequestVoteResponse {
                     id,
@@ -307,8 +325,21 @@ impl Server {
                 Ok(RPC::AppendEntriesResponse {
                     id,
                     term,
+                    idx,
                     result,
                 }) => {
+                    if term > self.curr_term {
+                        self.curr_term = term;
+                        self.become_follower();
+                    } else if result {
+                        // update next_idx and match_idx
+                        self.match_idx[id as usize] = max(self.match_idx[id as usize], idx);
+                        self.next_idx[id as usize] = max(self.next_idx[id as usize], idx + 1);
+                        debug!("server {} got AppendEntriesResponse from {}, match_idx {} next_idx {}", self.id, id, self.match_idx[id as usize], self.next_idx[id as usize]);
+                    } else {
+                        // decrement next_idx
+                        self.next_idx[id as usize] -= 1;
+                    }
                 },
                 Ok(rpc) => {
                     info!("server {} got a bad RPC {:?}", self.id, rpc);
@@ -337,11 +368,21 @@ impl Server {
     }
 
     pub fn tick_leader(&mut self) {
-        // send heartbeat to all servers
+        // send AppendEntries to all servers
         if self.elect_timer % PING_RATE == 0 {
-            let heartbeat = make_append_entries(self.id, self.curr_term, self.log.len() - 1, self.log.get_last().term, vec![], self.commit_idx);
-            for (_, tx) in self.s_txs.iter() {
-                tx.send(heartbeat.clone()).unwrap();
+            let heartbeat = make_append_entries(self.id, self.curr_term, 0, 0, vec![], self.commit_idx);
+            for (&i, tx) in self.s_txs.iter() {
+                let rpc: RPC;
+                if self.log.len() - 1 >= self.next_idx[i as usize] {
+                    let prev_idx = self.next_idx[i as usize] - 1;
+                    let prev_term = self.log.get(prev_idx).unwrap().term;
+                    let entries = (&self.log.get_vec()[prev_idx + 1..]).to_vec();
+                    debug!("server {} sending {} {} entries to commit starting at {}", self.id, i, entries.len(), prev_idx + 1);
+                    rpc = make_append_entries(self.id, self.curr_term, prev_idx, prev_term, entries, self.commit_idx);
+                } else {
+                    rpc = heartbeat.clone();
+                }
+                tx.send(rpc).unwrap();
             }
             // leader can't time out, so just reset election timer
             self.elect_timer = 0;
@@ -350,10 +391,6 @@ impl Server {
 
     pub fn run(&mut self) {
         // self.test_comms();
-        // println!("server {} election timeout {}", self.id, self.elect_timeout);
-
-        println!("TODO need to stop sending extra messages to all servers");
-        println!("sending RequestVote when they've already voted for you is... not helpful, it just clogs the channel");
 
         // MAIN LOOP
         // while running {
@@ -367,6 +404,7 @@ impl Server {
             // if commit_idx > applied_idx, increment applied_idx and apply log[applied_idx]
             while self.commit_idx > self.applied_idx {
                 self.applied_idx += 1;
+                debug!("server {} applying log index {}", self.id, self.applied_idx);
                 self.log.apply(self.applied_idx);
             }
 

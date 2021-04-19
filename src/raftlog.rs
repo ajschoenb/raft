@@ -101,6 +101,12 @@ impl RaftLog {
         ret
     }
 
+    pub fn get_vec(&self) -> Vec<RaftLogEntry> {
+        let lock = Arc::clone(&self.log_arc);
+        let log = lock.lock().unwrap();
+        log.clone()
+    }
+
     pub fn get_last(&self) -> RaftLogEntry {
         let lock = Arc::clone(&self.log_arc);
         let log = lock.lock().unwrap();

@@ -141,7 +141,7 @@ fn main() {
             .module(module_path!())
             .quiet(false)
             .timestamp(stderrlog::Timestamp::Millisecond)
-            .verbosity(3)
+            .verbosity(2)
             .init()
             .unwrap();
 
