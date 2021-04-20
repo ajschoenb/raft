@@ -11,10 +11,13 @@ pub mod server;
 pub mod client;
 pub mod rpc;
 pub mod raftlog;
+pub mod opts;
+pub mod checker;
 
-use rpc::*;
 use server::Server;
 use client::Client;
+use rpc::*;
+use opts::Opts;
 
 ///
 /// init_channels
@@ -77,7 +80,6 @@ fn init_servers(n: i32, running: &Arc<AtomicBool>, mut ss_senders: Vec<HashMap<i
         let rx = s_recvers.remove(0);
         let logpathbase = shellexpand::tilde("~/raft");
         let lpath = format!("{}/server{}.log", logpathbase, i);
-        println!("{}", lpath);
         let s = Server::new(i,
                             running,
                             lpath,
@@ -136,18 +138,7 @@ fn launch(servers: Vec<Server>, clients: Vec<Client>) -> Vec<JoinHandle<()>> {
     handles
 }
 
-fn main() {
-    stderrlog::new()
-            .module(module_path!())
-            .quiet(false)
-            .timestamp(stderrlog::Timestamp::Millisecond)
-            .verbosity(2)
-            .init()
-            .unwrap();
-
-    let n_servers = 5;
-    let n_clients = 10;
-    let n_reqs = 10;
+fn run(opts: Opts) {
     let running = Arc::new(AtomicBool::new(true));
     let r = running.clone();
     ctrlc::set_handler(move || {
@@ -155,11 +146,28 @@ fn main() {
         r.store(false, Ordering::SeqCst);
     }).expect("error setting signal handler");
 
-    let (ss_senders, sc_senders, cs_senders, s_recvers, c_recvers) = init_channels(n_servers, n_clients);
-    let servers = init_servers(n_servers, &running.clone(), ss_senders, sc_senders, s_recvers);
-    let clients = init_clients(n_clients, n_reqs, &running.clone(), cs_senders, c_recvers);
+    let (ss_senders, sc_senders, cs_senders, s_recvers, c_recvers) = init_channels(opts.n_servers, opts.n_clients);
+    let servers = init_servers(opts.n_servers, &running.clone(), ss_senders, sc_senders, s_recvers);
+    let clients = init_clients(opts.n_clients, opts.n_request, &running.clone(), cs_senders, c_recvers);
     let handles = launch(servers, clients);
     for h in handles {
         h.join().unwrap();
+    }
+}
+
+fn main() {
+    let opts = Opts::new();
+    stderrlog::new()
+            .module(module_path!())
+            .quiet(false)
+            .timestamp(stderrlog::Timestamp::Millisecond)
+            .verbosity(opts.verbosity)
+            .init()
+            .unwrap();
+
+    match opts.mode.as_ref() {
+        "run" => run(opts),
+        "check" => checker::check(opts, shellexpand::tilde("~/raft").to_string()),
+        _ => panic!("unknown mode"),
     }
 }

@@ -125,4 +125,17 @@ impl RaftLog {
         let len = log.len();
         log.drain(idx..len);
     }
+
+    pub fn contains(&self, opid: i32) -> Option<bool> {
+        let lock = Arc::clone(&self.log_arc);
+        let log = lock.lock().unwrap();
+        match log.iter().find(|&e| e.opid == opid) {
+            Some(e) => Some(e.applied),
+            None => None,
+        }
+    }
+
+    pub fn arc(&self) -> Arc<Mutex<Vec<RaftLogEntry>>> {
+        Arc::clone(&self.log_arc)
+    }
 }

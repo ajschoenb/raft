@@ -5,7 +5,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 use crate::rpc::*;
 
-static REQNO: AtomicI32 = AtomicI32::new(0);
+static REQNO: AtomicI32 = AtomicI32::new(1);
 
 ///
 /// Client
@@ -76,7 +76,7 @@ impl Client {
             let req = make_client_request(self.id, req_opid);
             loop {
                 self.txs[&leader_idx].send(req.clone()).unwrap();
-                match self.rx.recv_timeout(Duration::from_millis(500)) {
+                match self.rx.recv_timeout(Duration::from_millis(100)) {
                     Ok(RPC::ClientResponse {
                         id: _,
                         opid: _,
@@ -99,5 +99,8 @@ impl Client {
                 }
             }
         }
+
+        println!("client {} done with requests", self.id);
+        while self.is_running() {}
     }
 }

@@ -1,17 +1,19 @@
 extern crate log;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 use std::sync::mpsc::{Sender, Receiver};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::cmp::{min, max};
-use rand::{thread_rng, Rng};
+use rand::{thread_rng, Rng, random};
 use log::*;
 use crate::rpc::*;
 use crate::raftlog::*;
 
-static BASE_ELECT_TIMEOUT: i32 = 100000;
+static BASE_ELECT_TIMEOUT: i32 = 500000;
 static PING_RATE: i32 = 5000;
+static CRASH_FREQ: u32 = 100000000;
+static CRASH_LENGTH: i32 = 10000000;
 
 ///
 /// ServerState
@@ -70,11 +72,23 @@ pub struct Server {
     // for each other server, the highest log index that matches
     match_idx: Vec<usize>,
 
+    // map from log index -> client index and client response when that index is applied
+    client_res: HashMap<usize, (i32, RPC)>,
+
     // election timeout, in "ticks"
     elect_timeout: i32,
 
     // election timer, in "ticks"
     elect_timer: i32,
+
+    // if the server is currently crashed
+    crashed: bool,
+
+    // crash timer, in "ticks"
+    crash_timer: i32,
+
+    // set of unique request IDs that have been committed
+    committed_ops: HashSet<i32>,
 
     // COMMUNICATION CHANNELS
     // senders for each other server
@@ -110,8 +124,12 @@ impl Server {
             votes_recved: vec![],
             next_idx: vec![0; n_servers as usize],
             match_idx: vec![0; n_servers as usize],
+            client_res: HashMap::new(),
             elect_timeout: thread_rng().gen_range(BASE_ELECT_TIMEOUT..2 * BASE_ELECT_TIMEOUT),
             elect_timer: 0,
+            crashed: false,
+            crash_timer: 0,
+            committed_ops: HashSet::new(),
             s_txs: s_txs,
             c_txs: c_txs,
             rx: rx,
@@ -171,18 +189,21 @@ impl Server {
         if self.state != ServerState::Leader {
             info!("server {} becoming leader", self.id);
         }
+        // insert blank no-op entry into log
+        self.log.append(RaftLogEntry::new(0, self.curr_term));
+
         let last_log_idx = self.log.len() - 1;
-        self.elect_timer = 0;
+        self.elect_timer = -1;
         self.next_idx.fill(last_log_idx + 1);
         self.match_idx.fill(0);
         self.state = ServerState::Leader;
+
     }
 
     pub fn handle_recv_append_entries(&mut self, id: i32, term: i64, prev_log_idx: usize, prev_log_term: i64, entries: Vec<RaftLogEntry>, leader_commit_idx: usize) {
         // reset election timer
         self.elect_timer = 0;
 
-        let mut last_new_entry_idx = prev_log_idx;
         // 1. reply false if term < curr_term
         // 2. reply false if no entry at prev_log_idx whose term matches prev_log_term
         let success = term >= self.curr_term && match self.log.get(prev_log_idx) {
@@ -202,16 +223,19 @@ impl Server {
                         // conflict -> delete existing entries
                         // no conflict -> entry already exists in the log
                         if existing_entry.term != entry.term {
+                            debug!("server {} deleting log starting at {}", self.id, idx);
                             self.log.delete_from(idx);
+                            self.log.append(entry);
                         } else {
+                            debug!("server {} existing entry at index {}", self.id, idx);
                             assert_eq!(existing_entry.opid, entry.opid);
-                            last_new_entry_idx = idx;
                         }
                     },
                     None => {
                         // nothing there -> append entry
+                        assert!(self.log.len() == idx, "log length inconsistent, {} {}", self.log.len(), idx);
+                        debug!("server {} appending opid {} to log at index {}", self.id, entry.opid, idx);
                         self.log.append(entry);
-                        last_new_entry_idx = idx;
                     },
                 }
             }
@@ -219,20 +243,16 @@ impl Server {
             // 5. if leader_commit_idx > commit_idx, set commit_idx =
             //    min(leader_commit_idx, idx of last new entry)
             if leader_commit_idx > self.commit_idx {
-                self.commit_idx = min(leader_commit_idx, last_new_entry_idx);
+                self.update_commit_idx(min(leader_commit_idx, self.log.len() - 1));
             }
         }
 
         // actually send a response
-        debug!("server {} handled AppendEntries? {}, last new entry idx {}", self.id, success, last_new_entry_idx);
-        let response = make_append_entries_response(self.id, self.curr_term, last_new_entry_idx, success);
+        let response = make_append_entries_response(self.id, self.curr_term, self.log.len() - 1, success);
         self.send_server(id, response);
     }
 
     pub fn handle_recv_request_vote(&mut self, id: i32, term: i64, last_log_idx: usize, last_log_term: i64) {
-        // reset election timer
-        self.elect_timer = 0;
-
         // 1. reply false if term < curr_term
         // 2. if vote is null or id, and candidate's log is at least as up-to-date as self,
         //    reply true, else reply false
@@ -285,22 +305,30 @@ impl Server {
                     id,
                     opid,
                 }) => {
-                    let response: RPC;
                     if self.state == ServerState::Leader {
-                        // process the request and send back the result
-                        let entry = RaftLogEntry::new(opid, self.curr_term);
-                        self.log.append(entry);
-                        assert_eq!(self.applied_idx, self.commit_idx);
-                        self.commit_idx += 1;
-                        self.log.apply(self.commit_idx);
-                        self.applied_idx += 1;
+                        let response = make_client_response(self.id, opid, true);
 
-                        response = make_client_response(self.id, opid, true);
+                        match self.log.contains(opid) {
+                            Some(true) => {
+                                info!("server {} short-circuiting applied request {}", self.id, opid);
+                                self.c_txs[&id].send(response).unwrap();
+                            },
+                            Some(false) => {
+                                info!("server {} short-circuiting non-applied request {}", self.id, opid);
+                                self.client_res.insert(self.log.len() - 1, (id, response));
+                            },
+                            None => {
+                                // process the request and remember to send back the result
+                                let entry = RaftLogEntry::new(opid, self.curr_term);
+                                self.log.append(entry);
+                                self.client_res.insert(self.log.len() - 1, (id, response));
+                            },
+                        }
                     } else {
                         // tell client that this isn't the leader so they can try someone else
-                        response = make_client_response(self.id, opid, false);
+                        let response = make_client_response(self.id, opid, false);
+                        self.c_txs[&id].send(response).unwrap();
                     }
-                    self.c_txs[&id].send(response).unwrap();
                 },
                 Ok(RPC::RequestVoteResponse {
                     id,
@@ -335,7 +363,6 @@ impl Server {
                         // update next_idx and match_idx
                         self.match_idx[id as usize] = max(self.match_idx[id as usize], idx);
                         self.next_idx[id as usize] = max(self.next_idx[id as usize], idx + 1);
-                        debug!("server {} got AppendEntriesResponse from {}, match_idx {} next_idx {}", self.id, id, self.match_idx[id as usize], self.next_idx[id as usize]);
                     } else {
                         // decrement next_idx
                         self.next_idx[id as usize] -= 1;
@@ -370,7 +397,7 @@ impl Server {
     pub fn tick_leader(&mut self) {
         // send AppendEntries to all servers
         if self.elect_timer % PING_RATE == 0 {
-            let heartbeat = make_append_entries(self.id, self.curr_term, 0, 0, vec![], self.commit_idx);
+            let heartbeat = make_append_entries(self.id, self.curr_term, self.log.len() - 1, self.log.get(self.log.len() - 1).unwrap().term, vec![], self.commit_idx);
             for (&i, tx) in self.s_txs.iter() {
                 let rpc: RPC;
                 if self.log.len() - 1 >= self.next_idx[i as usize] {
@@ -387,6 +414,25 @@ impl Server {
             // leader can't time out, so just reset election timer
             self.elect_timer = 0;
         }
+
+        // if there exists an N such that N > commit_idx, a majority of match_idx[i] >= N, and
+        // log[N].term == curr_term, set commit_idx = N
+        let mut sorted_match_idx = self.match_idx.clone();
+        sorted_match_idx.sort();
+        let majority_match_idx = sorted_match_idx[sorted_match_idx.len() / 2 + 1];
+        if majority_match_idx > self.commit_idx && self.log.get(majority_match_idx).unwrap().term == self.curr_term {
+            debug!("leader update commit_idx to {}", majority_match_idx);
+            self.update_commit_idx(majority_match_idx);
+        }
+    }
+
+    pub fn crash(&mut self) {
+        self.crashed = true;
+        self.crash_timer = 0;
+    }
+
+    pub fn update_commit_idx(&mut self, new_commit_idx: usize) {
+        self.commit_idx = new_commit_idx;
     }
 
     pub fn run(&mut self) {
@@ -401,34 +447,66 @@ impl Server {
         //      YOU NEED TO KEEP LOOPING BECAUSE OF HEARTBEATS
         // }
         while self.is_running() {
-            // if commit_idx > applied_idx, increment applied_idx and apply log[applied_idx]
-            while self.commit_idx > self.applied_idx {
-                self.applied_idx += 1;
-                debug!("server {} applying log index {}", self.id, self.applied_idx);
-                self.log.apply(self.applied_idx);
-            }
+            if self.crashed {
+                // ignore messages sent while crashed
+                match self.rx.try_recv() { _ => {} };
 
-            // check for election timeout
-            self.elect_timer += 1;
-            if self.elect_timer >= self.elect_timeout {
-                self.become_candidate();
-            }
+                // spin until uncrashed
+                self.crash_timer += 1;
+                if self.crash_timer == CRASH_LENGTH {
+                    info!("server {} uncrashing", self.id);
+                    self.become_follower();
+                    self.crashed = false;
+                }
+            } else {
+                // check for random crash
+                let mut x = random::<u32>() % CRASH_FREQ;
+                if self.state == ServerState::Leader {
+                    x /= 100;
+                }
+                if x == 0 {
+                    info!("server {} crashing", self.id);
+                    self.crash();
+                }
 
-            // tick based on state
-            match self.state {
-                ServerState::Follower => {
-                    self.tick_follower();
-                },
-                ServerState::Candidate => {
-                    self.tick_candidate();
-                },
-                ServerState::Leader => {
-                    self.tick_leader();
-                },
-            }
+                // if commit_idx > applied_idx, increment applied_idx and apply log[applied_idx]
+                while self.commit_idx > self.applied_idx {
+                    self.applied_idx += 1;
+                    self.log.apply(self.applied_idx);
 
-            // receive and respond to incoming RPCs
-            self.recv_rpc();
+                    if self.state == ServerState::Leader {
+                        match self.client_res.remove(&self.applied_idx) {
+                            Some((i, res)) => {
+                                self.c_txs[&i].send(res).unwrap();
+                            },
+                            None => {
+                            },
+                        }
+                    }
+                }
+
+                // check for election timeout
+                self.elect_timer += 1;
+                if self.elect_timer >= self.elect_timeout {
+                    self.become_candidate();
+                }
+
+                // receive and respond to incoming RPCs
+                self.recv_rpc();
+
+                // tick based on state
+                match self.state {
+                    ServerState::Follower => {
+                        self.tick_follower();
+                    },
+                    ServerState::Candidate => {
+                        self.tick_candidate();
+                    },
+                    ServerState::Leader => {
+                        self.tick_leader();
+                    },
+                }
+            }
         }
     }
 }
