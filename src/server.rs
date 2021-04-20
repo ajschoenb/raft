@@ -10,9 +10,11 @@ use log::*;
 use crate::rpc::*;
 use crate::raftlog::*;
 
+// all in "ticks"
+// TODO find a better unit of measurement for these...
 static BASE_ELECT_TIMEOUT: i32 = 500000;
 static PING_RATE: i32 = 5000;
-static CRASH_FREQ: u32 = 100000000;
+static CRASH_FREQ: u32 = 10000000;
 static CRASH_LENGTH: i32 = 10000000;
 
 ///
@@ -122,7 +124,7 @@ impl Server {
             applied_idx: 0,
             votes_needed: n_servers / 2 + 1,
             votes_recved: vec![],
-            next_idx: vec![0; n_servers as usize],
+            next_idx: vec![1; n_servers as usize],
             match_idx: vec![0; n_servers as usize],
             client_res: HashMap::new(),
             elect_timeout: thread_rng().gen_range(BASE_ELECT_TIMEOUT..2 * BASE_ELECT_TIMEOUT),
@@ -145,14 +147,9 @@ impl Server {
         }
         for _ in 0..(self.s_txs.len() + self.c_txs.len()) {
             match self.rx.recv_timeout(Duration::from_secs(1)) {
-                Ok(RPC::ClientRequest { id: _, opid: _ }) => {
-                },
-                Ok(_) => {
-                    panic!("server {} got a bad RPC", self.id);
-                },
-                Err(_) => {
-                    panic!("server {} failed to get enough RPCs", self.id);
-                }
+                Ok(RPC::ClientRequest { id: _, opid: _ }) => {},
+                Ok(_) => panic!("server {} got a bad RPC", self.id),
+                Err(_) => panic!("server {} failed to get enough RPCs", self.id),
             }
         }
         println!("server {} passed all tests", self.id);
@@ -162,8 +159,12 @@ impl Server {
         self.running.load(Ordering::SeqCst)
     }
 
-    pub fn send_server(&mut self, id: i32, rpc: RPC) {
+    pub fn send_server(&self, id: i32, rpc: RPC) {
         self.s_txs[&id].send(rpc).unwrap();
+    }
+
+    pub fn send_client(&self, id: i32, rpc: RPC) {
+        self.c_txs[&id].send(rpc).unwrap();
     }
 
     pub fn become_follower(&mut self) {
@@ -243,7 +244,7 @@ impl Server {
             // 5. if leader_commit_idx > commit_idx, set commit_idx =
             //    min(leader_commit_idx, idx of last new entry)
             if leader_commit_idx > self.commit_idx {
-                self.update_commit_idx(min(leader_commit_idx, self.log.len() - 1));
+                self.commit_idx = min(leader_commit_idx, self.log.len() - 1);
             }
         }
 
@@ -268,6 +269,64 @@ impl Server {
         // actually send a response
         let response = make_request_vote_response(self.id, self.curr_term, success);
         self.send_server(id, response);
+    }
+
+    pub fn handle_recv_client_request(&mut self, id: i32, opid: i32) {
+        if self.state == ServerState::Leader {
+            let response = make_client_response(self.id, opid, true);
+
+            match self.log.contains(opid) {
+                Some(true) => {
+                    info!("server {} short-circuiting applied request {}", self.id, opid);
+                    self.send_client(id, response);
+                },
+                Some(false) => {
+                    info!("server {} short-circuiting non-applied request {}", self.id, opid);
+                    self.client_res.insert(self.log.len() - 1, (id, response));
+                },
+                None => {
+                    // process the request and remember to send back the result
+                    let entry = RaftLogEntry::new(opid, self.curr_term);
+                    self.log.append(entry);
+                    self.client_res.insert(self.log.len() - 1, (id, response));
+                },
+            }
+        } else {
+            // tell client that this isn't the leader so they can try someone else
+            let response = make_client_response(self.id, opid, false);
+            self.send_client(id, response);
+        }
+    }
+
+    pub fn handle_recv_request_vote_response(&mut self, id: i32, term: i64, vote: bool) {
+        if term > self.curr_term {
+            self.curr_term = term;
+            self.become_follower();
+        } else if self.state == ServerState::Candidate {
+            if vote && !self.votes_recved.iter().any(|&i| i == id) {
+                self.votes_recved.push(id);
+                info!("server {} recved vote from {}, now have {} votes", self.id, id, self.votes_recved.len());
+            }
+            if self.votes_recved.len() >= self.votes_needed as usize {
+                self.become_leader();
+            }
+        } else {
+            info!("server {} recved vote, but not candidate", self.id);
+        }
+    }
+
+    pub fn handle_recv_append_entries_response(&mut self, id: i32, term: i64, idx: usize, result: bool) {
+        if term > self.curr_term {
+            self.curr_term = term;
+            self.become_follower();
+        } else if result {
+            // update next_idx and match_idx
+            self.match_idx[id as usize] = max(self.match_idx[id as usize], idx);
+            self.next_idx[id as usize] = max(self.next_idx[id as usize], idx + 1);
+        } else {
+            // decrement next_idx
+            self.next_idx[id as usize] -= 1;
+        }
     }
 
     pub fn recv_rpc(&mut self) {
@@ -305,50 +364,14 @@ impl Server {
                     id,
                     opid,
                 }) => {
-                    if self.state == ServerState::Leader {
-                        let response = make_client_response(self.id, opid, true);
-
-                        match self.log.contains(opid) {
-                            Some(true) => {
-                                info!("server {} short-circuiting applied request {}", self.id, opid);
-                                self.c_txs[&id].send(response).unwrap();
-                            },
-                            Some(false) => {
-                                info!("server {} short-circuiting non-applied request {}", self.id, opid);
-                                self.client_res.insert(self.log.len() - 1, (id, response));
-                            },
-                            None => {
-                                // process the request and remember to send back the result
-                                let entry = RaftLogEntry::new(opid, self.curr_term);
-                                self.log.append(entry);
-                                self.client_res.insert(self.log.len() - 1, (id, response));
-                            },
-                        }
-                    } else {
-                        // tell client that this isn't the leader so they can try someone else
-                        let response = make_client_response(self.id, opid, false);
-                        self.c_txs[&id].send(response).unwrap();
-                    }
+                    self.handle_recv_client_request(id, opid);
                 },
                 Ok(RPC::RequestVoteResponse {
                     id,
                     term,
                     vote,
                 }) => {
-                    if term > self.curr_term {
-                        self.curr_term = term;
-                        self.become_follower();
-                    } else if self.state == ServerState::Candidate {
-                        if vote && !self.votes_recved.iter().any(|&i| i == id) {
-                            self.votes_recved.push(id);
-                            info!("server {} recved vote from {}, now have {} votes", self.id, id, self.votes_recved.len());
-                        }
-                        if self.votes_recved.len() >= self.votes_needed as usize {
-                            self.become_leader();
-                        }
-                    } else {
-                        info!("server {} recved vote, but not candidate", self.id);
-                    }
+                    self.handle_recv_request_vote_response(id, term, vote);
                 },
                 Ok(RPC::AppendEntriesResponse {
                     id,
@@ -356,23 +379,12 @@ impl Server {
                     idx,
                     result,
                 }) => {
-                    if term > self.curr_term {
-                        self.curr_term = term;
-                        self.become_follower();
-                    } else if result {
-                        // update next_idx and match_idx
-                        self.match_idx[id as usize] = max(self.match_idx[id as usize], idx);
-                        self.next_idx[id as usize] = max(self.next_idx[id as usize], idx + 1);
-                    } else {
-                        // decrement next_idx
-                        self.next_idx[id as usize] -= 1;
-                    }
+                    self.handle_recv_append_entries_response(id, term, idx, result);
                 },
                 Ok(rpc) => {
-                    info!("server {} got a bad RPC {:?}", self.id, rpc);
+                    panic!("server {} got a bad RPC {:?}", self.id, rpc);
                 },
                 Err(_) => {
-                    // no need to panic, we just didn't have a message queued up
                     break;
                 },
             }
@@ -388,8 +400,8 @@ impl Server {
             let last_log_idx = self.log.len() - 1;
             let last_log_term = self.log.get(last_log_idx).unwrap().term;
             let request = make_request_vote(self.id, self.curr_term, last_log_idx, last_log_term);
-            for (_, tx) in self.s_txs.iter().filter(|(i, _)| !self.votes_recved.contains(i)) {
-                tx.send(request.clone()).unwrap();
+            for (&i, _) in self.s_txs.iter().filter(|(i, _)| !self.votes_recved.contains(i)) {
+                self.send_server(i, request.clone());
             }
         }
     }
@@ -398,7 +410,7 @@ impl Server {
         // send AppendEntries to all servers
         if self.elect_timer % PING_RATE == 0 {
             let heartbeat = make_append_entries(self.id, self.curr_term, self.log.len() - 1, self.log.get(self.log.len() - 1).unwrap().term, vec![], self.commit_idx);
-            for (&i, tx) in self.s_txs.iter() {
+            for (&i, _) in self.s_txs.iter() {
                 let rpc: RPC;
                 if self.log.len() - 1 >= self.next_idx[i as usize] {
                     let prev_idx = self.next_idx[i as usize] - 1;
@@ -409,7 +421,7 @@ impl Server {
                 } else {
                     rpc = heartbeat.clone();
                 }
-                tx.send(rpc).unwrap();
+                self.send_server(i, rpc);
             }
             // leader can't time out, so just reset election timer
             self.elect_timer = 0;
@@ -422,8 +434,13 @@ impl Server {
         let majority_match_idx = sorted_match_idx[sorted_match_idx.len() / 2 + 1];
         if majority_match_idx > self.commit_idx && self.log.get(majority_match_idx).unwrap().term == self.curr_term {
             debug!("leader update commit_idx to {}", majority_match_idx);
-            self.update_commit_idx(majority_match_idx);
+            self.commit_idx = majority_match_idx;
         }
+    }
+
+    pub fn should_crash(&self) -> bool {
+        let x = random::<u32>() % CRASH_FREQ;
+        x == 0
     }
 
     pub fn crash(&mut self) {
@@ -431,8 +448,22 @@ impl Server {
         self.crash_timer = 0;
     }
 
-    pub fn update_commit_idx(&mut self, new_commit_idx: usize) {
-        self.commit_idx = new_commit_idx;
+    pub fn tick_crashed(&mut self) {
+        // ignore messages sent while crashed
+        loop {
+            match self.rx.try_recv() {
+                Ok(_) => {},
+                Err(_) => break,
+            }
+        }
+
+        // spin until uncrashed
+        self.crash_timer += 1;
+        if self.crash_timer == CRASH_LENGTH {
+            info!("server {} uncrashing", self.id);
+            self.become_follower();
+            self.crashed = false;
+        }
     }
 
     pub fn run(&mut self) {
@@ -443,28 +474,14 @@ impl Server {
         //      increment the "timer" and check for election timeout
         //      try_recv a message
         //      process the message
-        //      BLOCKING IS BAD, DON'T DO IT
-        //      YOU NEED TO KEEP LOOPING BECAUSE OF HEARTBEATS
+        //      send messages to other servers as needed
         // }
         while self.is_running() {
             if self.crashed {
-                // ignore messages sent while crashed
-                match self.rx.try_recv() { _ => {} };
-
-                // spin until uncrashed
-                self.crash_timer += 1;
-                if self.crash_timer == CRASH_LENGTH {
-                    info!("server {} uncrashing", self.id);
-                    self.become_follower();
-                    self.crashed = false;
-                }
+                self.tick_crashed();
             } else {
                 // check for random crash
-                let mut x = random::<u32>() % CRASH_FREQ;
-                if self.state == ServerState::Leader {
-                    x /= 100;
-                }
-                if x == 0 {
+                if self.should_crash() {
                     info!("server {} crashing", self.id);
                     self.crash();
                 }
@@ -474,13 +491,11 @@ impl Server {
                     self.applied_idx += 1;
                     self.log.apply(self.applied_idx);
 
+                    // if we're the leader, check to notify a client their request was applied
                     if self.state == ServerState::Leader {
                         match self.client_res.remove(&self.applied_idx) {
-                            Some((i, res)) => {
-                                self.c_txs[&i].send(res).unwrap();
-                            },
-                            None => {
-                            },
+                            Some((i, res)) => self.send_client(i, res),
+                            None => {},
                         }
                     }
                 }
@@ -496,15 +511,9 @@ impl Server {
 
                 // tick based on state
                 match self.state {
-                    ServerState::Follower => {
-                        self.tick_follower();
-                    },
-                    ServerState::Candidate => {
-                        self.tick_candidate();
-                    },
-                    ServerState::Leader => {
-                        self.tick_leader();
-                    },
+                    ServerState::Follower => self.tick_follower(),
+                    ServerState::Candidate => self.tick_candidate(),
+                    ServerState::Leader => self.tick_leader(),
                 }
             }
         }

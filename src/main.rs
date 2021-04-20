@@ -5,7 +5,7 @@ use std::sync::mpsc::{channel, Sender, Receiver};
 use std::thread;
 use std::thread::JoinHandle;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 
 pub mod server;
 pub mod client;
@@ -101,11 +101,14 @@ fn init_servers(n: i32, running: &Arc<AtomicBool>, mut ss_senders: Vec<HashMap<i
 fn init_clients(n: i32, n_reqs: i64, running: &Arc<AtomicBool>, mut cs_senders: Vec<HashMap<i32, Sender<RPC>>>, mut c_recvers: Vec<Receiver<RPC>>) -> Vec<Client> {
     let mut clients = vec![];
 
+    let g_reqs = Arc::new(AtomicI64::new((n as i64) * n_reqs));
+
     for i in 0..n {
         let txs = cs_senders.remove(0);
         let rx = c_recvers.remove(0);
         let c = Client::new(i,
                             n_reqs,
+                            &g_reqs,
                             running,
                             txs,
                             rx);

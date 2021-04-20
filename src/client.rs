@@ -2,7 +2,8 @@ use std::collections::HashMap;
 use std::time::Duration;
 use std::sync::mpsc::{Sender, Receiver};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicI64, Ordering};
+use std::thread;
 use crate::rpc::*;
 
 static REQNO: AtomicI32 = AtomicI32::new(1);
@@ -15,6 +16,7 @@ static REQNO: AtomicI32 = AtomicI32::new(1);
 pub struct Client {
     pub id: i32,
     n_reqs: i64,
+    g_reqs: Arc<AtomicI64>,
     running: Arc<AtomicBool>,
     txs: HashMap<i32, Sender<RPC>>,
     rx: Receiver<RPC>,
@@ -24,6 +26,7 @@ impl Client {
     pub fn new(
         id: i32,
         n_reqs: i64,
+        g_reqs: &Arc<AtomicI64>,
         running: &Arc<AtomicBool>,
         txs: HashMap<i32, Sender<RPC>>,
         rx: Receiver<RPC>,
@@ -31,6 +34,7 @@ impl Client {
         Client {
             id: id,
             n_reqs: n_reqs,
+            g_reqs: g_reqs.clone(),
             running: running.clone(),
             txs: txs,
             rx: rx,
@@ -90,17 +94,18 @@ impl Client {
                             leader_idx = (leader_idx + 1) % (self.txs.len() as i32);
                         }
                     },
-                    Ok(rpc) => {
-                        panic!("client {} recved a bad RPC {:?}", self.id, rpc);
-                    },
-                    Err(_) => {
-                        continue;
-                    },
+                    Ok(rpc) => panic!("client {} recved a bad RPC {:?}", self.id, rpc),
+                    Err(_) => continue,
                 }
             }
         }
 
         println!("client {} done with requests", self.id);
+        self.g_reqs.fetch_sub(self.n_reqs, Ordering::SeqCst);
+        if self.g_reqs.load(Ordering::SeqCst) == 0 {
+            thread::sleep(Duration::from_secs(3));
+            self.running.store(false, Ordering::SeqCst);
+        }
         while self.is_running() {}
     }
 }
