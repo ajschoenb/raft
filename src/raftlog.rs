@@ -135,6 +135,16 @@ impl RaftLog {
         }
     }
 
+    pub fn idxof(&self, opid: i32) -> Option<usize> {
+        let lock = Arc::clone(&self.log_arc);
+        let log = lock.lock().unwrap();
+        let mut ret = None;
+        for (i, e) in log.iter().enumerate() {
+            if e.opid == opid { ret = Some(i); break; }
+        }
+        ret
+    }
+
     pub fn arc(&self) -> Arc<Mutex<Vec<RaftLogEntry>>> {
         Arc::clone(&self.log_arc)
     }
