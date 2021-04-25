@@ -1,6 +1,7 @@
 extern crate log;
 use log::*;
 use std::collections::HashMap;
+
 use crate::opts::Opts;
 use crate::raftlog::RaftLog;
 

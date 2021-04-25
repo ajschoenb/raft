@@ -96,14 +96,6 @@ pub struct Server<C: RaftComms> {
 
     // communication struct
     comms: C,
-    // senders for each other server
-    // s_txs: HashMap<i32, Sender<RPC>>,
-
-    // senders for each client
-    // c_txs: HashMap<i32, Sender<RPC>>,
-
-    // generic receiver
-    // rx: Receiver<RPC>,
 }
 
 impl<C> Server<C> where C: RaftComms {
@@ -113,9 +105,6 @@ impl<C> Server<C> where C: RaftComms {
         lpath: String,
         server_ids: Vec<String>,
         comms: C,
-        // s_txs: HashMap<i32, Sender<RPC>>,
-        // c_txs: HashMap<i32, Sender<RPC>>,
-        // rx: Receiver<RPC>,
     ) -> Server<C> {
         Server {
             id: id,
@@ -137,44 +126,12 @@ impl<C> Server<C> where C: RaftComms {
             crash_timer: 0,
             server_ids: server_ids,
             comms: comms,
-            // s_txs: s_txs,
-            // c_txs: c_txs,
-            // rx: rx,
         }
     }
-
-    /*
-    pub fn test_comms(&self) {
-        for (_, tx) in &self.s_txs {
-            tx.send(make_client_request(self.id, 0)).unwrap();
-        }
-        for (_, tx) in &self.c_txs {
-            tx.send(make_client_request(self.id, 0)).unwrap();
-        }
-        for _ in 0..(self.s_txs.len() + self.c_txs.len()) {
-            match self.rx.recv_timeout(Duration::from_secs(1)) {
-                Ok(RPC::ClientRequest { id: _, opid: _ }) => {},
-                Ok(_) => panic!("server {} got a bad RPC", self.id),
-                Err(_) => panic!("server {} failed to get enough RPCs", self.id),
-            }
-        }
-        println!("server {} passed all tests", self.id);
-    }
-    */
 
     pub fn is_running(&self) -> bool {
         self.running.load(Ordering::SeqCst)
     }
-
-    /*
-    pub fn send_server(&self, id: i32, rpc: RPC) {
-        self.s_txs[&id].send(rpc).unwrap();
-    }
-
-    pub fn send_client(&self, id: i32, rpc: RPC) {
-        self.c_txs[&id].send(rpc).unwrap();
-    }
-    */
 
     pub fn become_follower(&mut self) {
         if self.state != ServerState::Follower {
@@ -263,7 +220,6 @@ impl<C> Server<C> where C: RaftComms {
 
         // actually send a response
         let response = make_append_entries_response(self.curr_term, self.log.len() - 1, success);
-        // self.send_server(id, response);
         self.comms.send(id, response);
     }
 
@@ -282,7 +238,6 @@ impl<C> Server<C> where C: RaftComms {
 
         // actually send a response
         let response = make_request_vote_response(self.curr_term, success);
-        // self.send_server(id, response);
         self.comms.send(id, response);
     }
 
@@ -310,7 +265,6 @@ impl<C> Server<C> where C: RaftComms {
         } else {
             // tell client that this isn't the leader so they can try someone else
             let response = make_client_response(opid, false);
-            // self.send_client(id, response);
             self.comms.send(id, response);
         }
     }
@@ -348,7 +302,6 @@ impl<C> Server<C> where C: RaftComms {
 
     pub fn recv_rpc(&mut self) {
         loop {
-            // match self.rx.try_recv() {
             match self.comms.try_recv() {
                 Some((id, RPC::AppendEntries {
                     term,
@@ -414,7 +367,6 @@ impl<C> Server<C> where C: RaftComms {
             let last_log_term = self.log.get(last_log_idx).unwrap().term;
             let request = make_request_vote(self.curr_term, last_log_idx, last_log_term);
             for id in self.server_ids.iter().filter(|i| !self.votes_recved.contains(i)) {
-                // self.send_server(i, request.clone());
                 self.comms.send(id.clone(), request.clone());
             }
         }
@@ -435,7 +387,6 @@ impl<C> Server<C> where C: RaftComms {
                 } else {
                     rpc = heartbeat.clone();
                 }
-                // self.send_server(i, rpc);
                 self.comms.send(id.clone(), rpc);
             }
             // leader can't time out, so just reset election timer
@@ -466,7 +417,6 @@ impl<C> Server<C> where C: RaftComms {
     pub fn tick_crashed(&mut self) {
         // ignore messages sent while crashed
         loop {
-            // match self.rx.try_recv() {
             match self.comms.try_recv() {
                 Some(_) => {},
                 None => break,
@@ -483,8 +433,6 @@ impl<C> Server<C> where C: RaftComms {
     }
 
     pub fn run(&mut self) {
-        // self.test_comms();
-
         // MAIN LOOP
         // while running {
         //      increment the "timer" and check for election timeout
@@ -510,7 +458,6 @@ impl<C> Server<C> where C: RaftComms {
                     // if we're the leader, check to notify a client their request was applied
                     if self.state == ServerState::Leader {
                         match self.client_res.remove(&self.applied_idx) {
-                            // Some((i, res)) => self.send_client(i, res),
                             Some((i, res)) => self.comms.send(i, res),
                             None => {},
                         }

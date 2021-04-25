@@ -1,5 +1,6 @@
 extern crate serde;
 extern crate serde_json;
+
 use crate::raftlog::RaftLogEntry;
 
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]

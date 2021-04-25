@@ -20,8 +20,6 @@ pub struct Client<C: RaftComms> {
     running: Arc<AtomicBool>,
     s_ids: Vec<String>,
     comms: C,
-    // txs: HashMap<i32, Sender<RPC>>,
-    // rx: Receiver<RPC>,
 }
 
 impl<C> Client<C> where C: RaftComms {
@@ -32,8 +30,6 @@ impl<C> Client<C> where C: RaftComms {
         running: &Arc<AtomicBool>,
         s_ids: Vec<String>,
         comms: C,
-        // txs: HashMap<i32, Sender<RPC>>,
-        // rx: Receiver<RPC>,
     ) -> Client<C> {
         Client {
             id: id,
@@ -42,39 +38,14 @@ impl<C> Client<C> where C: RaftComms {
             running: running.clone(),
             s_ids: s_ids,
             comms: comms,
-            // txs: txs,
-            // rx: rx,
         }
     }
-
-    /*
-    pub fn test_comms(&self) {
-        for (_, tx) in &self.txs {
-            tx.send(make_client_request(self.id, 0)).unwrap();
-        }
-        for _ in 0..self.txs.len() {
-            match self.rx.recv_timeout(Duration::from_secs(1)) {
-                Ok(RPC::ClientRequest { id: _, opid: _ }) => {
-                },
-                Ok(_) => {
-                    panic!("client {} got a bad RPC", self.id);
-                },
-                Err(_) => {
-                    panic!("client {} failed to get enough RPCs", self.id);
-                }
-            }
-        }
-        println!("client {} passed all tests", self.id);
-    }
-    */
 
     pub fn is_running(&self) -> bool {
         self.running.load(Ordering::SeqCst)
     }
 
     pub fn run(&mut self) {
-        // self.test_comms();
-        
         let mut leader_idx = 0;
         let mut n = 0;
 
@@ -88,9 +59,7 @@ impl<C> Client<C> where C: RaftComms {
             let req = make_client_request(req_opid);
             loop {
                 let leader_id = self.s_ids[leader_idx].clone();
-                // self.txs[&leader_idx].send(req.clone()).unwrap();
                 self.comms.send(leader_id, req.clone());
-                // match self.rx.recv_timeout(Duration::from_millis(100)) {
                 match self.comms.try_recv() {
                     Some((_, RPC::ClientResponse {
                         opid: _,
