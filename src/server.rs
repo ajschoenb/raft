@@ -5,17 +5,17 @@ use std::sync::mpsc::{Sender, Receiver};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::cmp::{min, max};
+use std::thread;
 use rand::{thread_rng, Rng, random};
 use log::*;
 use crate::rpc::*;
 use crate::raftlog::*;
 
-// all in "ticks"
-// TODO find a better unit of measurement for these...
-static BASE_ELECT_TIMEOUT: i32 = 500000;
-static PING_RATE: i32 = 5000;
-static CRASH_FREQ: u32 = 10000000;
-static CRASH_LENGTH: i32 = 10000000;
+// all measured in ms
+static BASE_ELECT_TIMEOUT: i32 = 150;
+static PING_RATE: i32 = 10;
+static CRASH_FREQ: u32 = 2000;
+static CRASH_LENGTH: i32 = 1000;
 
 ///
 /// ServerState
@@ -515,6 +515,9 @@ impl Server {
                     ServerState::Candidate => self.tick_candidate(),
                     ServerState::Leader => self.tick_leader(),
                 }
+
+                // sleep for 1 ms to make timing easy
+                thread::sleep(Duration::from_millis(1));
             }
         }
     }
