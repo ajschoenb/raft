@@ -45,7 +45,9 @@ impl Opts {
                 .takes_value(true)
                 .help("output verbosity"))
             .arg(Arg::with_name("client")
+                .long("client")
                 .required(false)
+                .takes_value(false)
                 .help("if this node is a client"))
             .arg(Arg::with_name("mode")
                 .short("m")
@@ -58,7 +60,7 @@ impl Opts {
         let n_clients = matches.value_of("n_clients").unwrap_or(_n_clients).parse::<i32>().unwrap();
         let n_request = matches.value_of("n_request").unwrap_or(_n_request).parse::<i64>().unwrap();
         let verbosity = matches.value_of("verbosity").unwrap_or(_verbosity).parse::<usize>().unwrap();
-        let isclient = matches.value_of("client").unwrap_or(_isclient).parse::<bool>().unwrap();
+        let isclient = matches.is_present("client");
         let mode = matches.value_of("mode").unwrap_or(_mode);
 
         match mode.as_ref() {
