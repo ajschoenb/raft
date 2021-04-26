@@ -66,6 +66,7 @@ impl RaftComms for RaftSocketComms {
     fn send(&self, addr: String, rpc: RPC) {
         let s_rpc = serde_json::to_string(&rpc).unwrap();
         let buf = s_rpc.as_bytes();
+        assert!(buf.len() < 576);
         self.socket.send_to(buf, addr).unwrap();
     }
 
