@@ -1,5 +1,7 @@
 use std::collections::HashMap;
 use std::sync::mpsc::{Sender, Receiver};
+use std::net::UdpSocket;
+use std::str;
 
 use crate::rpc::RPC;
 
@@ -45,4 +47,35 @@ impl RaftComms for RaftChannelComms {
 }
 
 pub struct RaftSocketComms {
+    socket: UdpSocket,
+}
+
+impl RaftSocketComms {
+    pub fn new(
+        socket: UdpSocket,
+    ) -> RaftSocketComms {
+        socket.set_nonblocking(true).unwrap();
+        RaftSocketComms {
+            socket: socket,
+        }
+    }
+
+}
+
+impl RaftComms for RaftSocketComms {
+    fn send(&self, addr: String, rpc: RPC) {
+        let s_rpc = serde_json::to_string(&rpc).unwrap();
+        let buf = s_rpc.as_bytes();
+        self.socket.send_to(buf, addr).unwrap();
+    }
+
+    fn try_recv(&self) -> Option<(String, RPC)> {
+        let mut buf = [0; 1000];
+        match self.socket.recv_from(&mut buf) {
+            Ok((n, addr)) => {
+                Some((addr.to_string(), serde_json::from_str(str::from_utf8(&buf[..n]).unwrap()).unwrap()))
+            },
+            Err(_) => None,
+        }
+    }
 }
