@@ -479,10 +479,10 @@ impl<C> Server<C> where C: RaftComms {
                     ServerState::Candidate => self.tick_candidate(),
                     ServerState::Leader => self.tick_leader(),
                 }
-
-                // sleep for 1 ms to make timing easy
-                thread::sleep(Duration::from_millis(1));
             }
+
+            // sleep for 1 ms to make timing easy
+            thread::sleep(Duration::from_millis(1));
         }
     }
 }

@@ -14,11 +14,11 @@ pub struct Opts {
 impl Opts {
     pub fn new() -> Opts {
         let _n_servers = "5";
-        let _n_clients = "10";
+        let _n_clients = "1";
         let _n_request = "100";
         let _verbosity = "0";
         let _isclient = "false";
-        let _mode = "run";
+        let _mode = "local";
 
         let matches = App::new("raft")
             .version("0.1.0")

@@ -1,12 +1,12 @@
 use std::time::Duration;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicI32, AtomicI64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::thread;
+use rand::random; 
+use log::*;
 
 use crate::rpc::*;
 use crate::comms::RaftComms;
-
-static REQNO: AtomicI32 = AtomicI32::new(1);
 
 ///
 /// Client
@@ -55,9 +55,9 @@ impl<C> Client<C> where C: RaftComms {
         //      wait for response - if failure or timeout then retry request
         // }
         while self.is_running() && n < self.n_reqs {
-            let req_opid = REQNO.fetch_add(1, Ordering::SeqCst);
+            let req_opid = random::<i32>();
             let req = make_client_request(req_opid);
-            loop {
+            while self.is_running() {
                 let leader_id = self.s_ids[leader_idx].clone();
                 self.comms.send(leader_id, req.clone());
                 match self.comms.try_recv() {
@@ -77,6 +77,7 @@ impl<C> Client<C> where C: RaftComms {
                     None => thread::sleep(Duration::from_millis(100)),
                 }
             }
+            info!("client {} recved response for req {}, opid {}", self.id, n, req_opid);
         }
 
         println!("client {} done with requests", self.id);
