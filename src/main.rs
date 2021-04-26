@@ -179,8 +179,6 @@ fn run_dist(opts: Opts, logpathbase: String) {
         len = reader.read_line(&mut line).unwrap();
     }
 
-    println!("{:?}", hosts);
-
     if opts.isclient {
         let g_reqs = Arc::new(AtomicI64::new(opts.n_request));
         let socket = UdpSocket::bind("0.0.0.0:5800").unwrap();
