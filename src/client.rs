@@ -55,7 +55,7 @@ impl<C> Client<C> where C: RaftComms {
         //      wait for response - if failure or timeout then retry request
         // }
         while self.is_running() && n < self.n_reqs {
-            let req_opid = random::<i32>();
+            let req_opid = random::<i64>();
             let req = make_client_request(req_opid);
             while self.is_running() {
                 let leader_id = self.s_ids[leader_idx].clone();

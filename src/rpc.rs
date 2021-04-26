@@ -27,10 +27,10 @@ pub enum RPC {
         vote: bool,
     },
     ClientRequest {
-        opid: i32,
+        opid: i64,
     },
     ClientResponse {
-        opid: i32,
+        opid: i64,
         success: bool,
     },
 }
@@ -86,7 +86,7 @@ pub fn make_request_vote_response(
 }
 
 pub fn make_client_request(
-    opid: i32,
+    opid: i64,
 ) -> RPC {
     RPC::ClientRequest {
         opid: opid,
@@ -94,7 +94,7 @@ pub fn make_client_request(
 }
 
 pub fn make_client_response(
-    opid: i32,
+    opid: i64,
     success: bool,
 ) -> RPC {
     RPC::ClientResponse {

@@ -241,7 +241,7 @@ impl<C> Server<C> where C: RaftComms {
         self.comms.send(id, response);
     }
 
-    pub fn handle_recv_client_request(&mut self, id: String, opid: i32) {
+    pub fn handle_recv_client_request(&mut self, id: String, opid: i64) {
         if self.state == ServerState::Leader {
             let response = make_client_response(opid, true);
 

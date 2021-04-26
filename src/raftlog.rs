@@ -8,14 +8,14 @@ use std::io::prelude::*;
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Copy, Clone, PartialEq, Eq)]
 pub struct RaftLogEntry {
-    pub opid: i32,
+    pub opid: i64,
     pub term: i64,
     pub applied: bool,
 }
 
 impl RaftLogEntry {
     pub fn new(
-        opid: i32,
+        opid: i64,
         term: i64,
     ) -> RaftLogEntry {
         RaftLogEntry {
@@ -126,7 +126,7 @@ impl RaftLog {
         log.drain(idx..len);
     }
 
-    pub fn contains(&self, opid: i32) -> Option<bool> {
+    pub fn contains(&self, opid: i64) -> Option<bool> {
         let lock = Arc::clone(&self.log_arc);
         let log = lock.lock().unwrap();
         match log.iter().find(|&e| e.opid == opid) {
@@ -135,7 +135,7 @@ impl RaftLog {
         }
     }
 
-    pub fn idxof(&self, opid: i32) -> Option<usize> {
+    pub fn idxof(&self, opid: i64) -> Option<usize> {
         let lock = Arc::clone(&self.log_arc);
         let log = lock.lock().unwrap();
         let mut ret = None;
