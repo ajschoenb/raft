@@ -183,7 +183,7 @@ fn run_dist(opts: Opts, logpathbase: String) {
 
     if opts.isclient {
         let g_reqs = Arc::new(AtomicI64::new(opts.n_request));
-        let socket = UdpSocket::bind("127.0.0.1:5800").unwrap();
+        let socket = UdpSocket::bind("0.0.0.0:5800").unwrap();
         let mut client = Client::new(
             socket.local_addr().unwrap().to_string(),
             opts.n_request,
