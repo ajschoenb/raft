@@ -6,6 +6,11 @@ use std::thread;
 use std::thread::JoinHandle;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
+use std::fs;
+use std::fs::File;
+use std::io::BufReader;
+use std::io::prelude::*;
+use std::net::{UdpSocket, SocketAddr};
 
 pub mod server;
 pub mod client;
@@ -18,7 +23,7 @@ pub mod comms;
 use server::Server;
 use client::Client;
 use opts::Opts;
-use comms::RaftChannelComms;
+use comms::{RaftChannelComms, RaftSocketComms};
 
 fn s_id(id: i32) -> String {
     format!("server{}", id)
@@ -79,12 +84,11 @@ fn init_comms(n_servers: i32, n_clients: i32) -> HashMap<String, RaftChannelComm
     comms
 }
 
-fn init_servers(n: i32, running: &Arc<AtomicBool>, s_ids: Vec<String>, comms: &mut HashMap<String, RaftChannelComms>) -> Vec<Server<RaftChannelComms>> {
+fn init_servers(n: i32, running: &Arc<AtomicBool>, s_ids: Vec<String>, comms: &mut HashMap<String, RaftChannelComms>, logpathbase: String) -> Vec<Server<RaftChannelComms>> {
     let mut servers = vec![];
 
     for i in 0..n {
         let id = s_id(i);
-        let logpathbase = shellexpand::tilde("~/raft");
         let lpath = format!("{}/{}.log", logpathbase, id.clone());
         let s = Server::new(id.clone(),
                             running,
@@ -134,7 +138,7 @@ fn launch(servers: Vec<Server<RaftChannelComms>>, clients: Vec<Client<RaftChanne
     handles
 }
 
-fn run(opts: Opts) {
+fn run_local(opts: Opts, logpathbase: String) {
     let running = Arc::new(AtomicBool::new(true));
     let r = running.clone();
     ctrlc::set_handler(move || {
@@ -145,11 +149,72 @@ fn run(opts: Opts) {
     let mut comms = init_comms(opts.n_servers, opts.n_clients);
     let mut s_ids = vec![];
     for i in 0..opts.n_servers { s_ids.push(s_id(i)) }
-    let servers = init_servers(opts.n_servers, &running.clone(), s_ids.clone(), &mut comms);
+    let servers = init_servers(opts.n_servers, &running.clone(), s_ids.clone(), &mut comms, logpathbase);
     let clients = init_clients(opts.n_clients, opts.n_request, &running.clone(), s_ids, &mut comms);
     let handles = launch(servers, clients);
     for h in handles {
         h.join().unwrap();
+    }
+}
+
+fn run_dist(opts: Opts, logpathbase: String) {
+    let running = Arc::new(AtomicBool::new(true));
+    let r = running.clone();
+    ctrlc::set_handler(move || {
+        println!("CTRL-C");
+        r.store(false, Ordering::SeqCst);
+    }).expect("error setting signal handler");
+
+    // load candidate socket addrs from hosts file
+    let hostsfile = File::open(format!("{}/hosts.txt", logpathbase)).unwrap();
+    let mut hosts = vec![];
+    let mut reader = BufReader::new(&hostsfile);
+    let mut line = String::new();
+    let mut len = reader.read_line(&mut line).unwrap();
+    while len > 0 {
+        if !line.starts_with("#") {
+            hosts.push(line.replace("\n", ""));
+        }
+        line = String::new();
+        len = reader.read_line(&mut line).unwrap();
+    }
+
+    println!("{:?}", hosts);
+
+    if opts.isclient {
+        let g_reqs = Arc::new(AtomicI64::new(opts.n_request));
+        let socket = UdpSocket::bind("127.0.0.1:5800").unwrap();
+        let mut client = Client::new(
+            socket.local_addr().unwrap().to_string(),
+            opts.n_request,
+            &g_reqs,
+            &running,
+            hosts,
+            RaftSocketComms::new(socket),
+        );
+        client.run();
+    } else {
+        // create socket from one of the candidate hosts
+        let addrs: Vec<SocketAddr> = hosts.iter().map(|h| h.parse().unwrap()).collect();
+        let socket = UdpSocket::bind(&addrs[..]).unwrap();
+        let addr = socket.local_addr().unwrap().to_string();
+        let mut server = Server::new(
+            addr.clone(),
+            &running,
+            format!("{}/{}.log", logpathbase, addr),
+            hosts,
+            RaftSocketComms::new(socket),
+        );
+        server.run();
+    }
+}
+
+fn clean(path: String) {
+    for p in fs::read_dir(path).unwrap() {
+        let p = p.unwrap().path();
+        if !p.to_string_lossy().into_owned().ends_with("hosts.txt") {
+            fs::remove_file(p).unwrap();
+        }
     }
 }
 
@@ -163,9 +228,13 @@ fn main() {
             .init()
             .unwrap();
 
+    let logpathbase = shellexpand::tilde("~/raft").to_string();
+
     match opts.mode.as_ref() {
-        "run" => run(opts),
-        "check" => checker::check(opts, shellexpand::tilde("~/raft").to_string()),
+        "local" => run_local(opts, logpathbase),
+        "dist" => run_dist(opts, logpathbase),
+        "check" => checker::check(opts, logpathbase),
+        "clean" => clean(logpathbase),
         _ => panic!("unknown mode"),
     }
 }
