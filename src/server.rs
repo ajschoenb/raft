@@ -381,7 +381,8 @@ impl<C> Server<C> where C: RaftComms {
                 if self.log.len() - 1 >= self.next_idx[id] {
                     let prev_idx = self.next_idx[id] - 1;
                     let prev_term = self.log.get(prev_idx).unwrap().term;
-                    let entries = (&self.log.get_vec()[prev_idx + 1..]).to_vec();
+                    let last_idx = min(self.log.len(), prev_idx + 20);
+                    let entries = (&self.log.get_vec()[prev_idx + 1..last_idx]).to_vec();
                     debug!("server {} sending {} {} entries to commit starting at {}", self.id, id, entries.len(), prev_idx + 1);
                     rpc = make_append_entries(self.curr_term, prev_idx, prev_term, entries, self.commit_idx);
                 } else {
