@@ -79,11 +79,11 @@ impl RaftLog {
 
     pub fn apply(&mut self, idx: usize) {
         let lock = Arc::clone(&self.log_arc);
-        let log = lock.lock().unwrap();
+        let mut log = lock.lock().unwrap();
         if idx < log.len() {
-            let mut entry = log[idx];
+            let mut entry = &mut log[idx];
             entry.applied = true;
-            serde_json::to_writer(&mut self.lfile, &entry).unwrap();
+            serde_json::to_writer(&mut self.lfile, entry).unwrap();
             writeln!(&mut self.lfile).unwrap();
             self.lfile.flush().unwrap();
         }
