@@ -166,7 +166,13 @@ fn run_dist(opts: Opts, logpathbase: String) {
     }).expect("error setting signal handler");
 
     // load candidate socket addrs from hosts file
-    let hostsfile = File::open(format!("{}/hosts.txt", logpathbase)).unwrap();
+    let hostspath: String;
+    if opts.isclient {
+        hostspath = format!("{}/hosts_client.txt", logpathbase);
+    } else {
+        hostspath = format!("{}/hosts.txt", logpathbase);
+    }
+    let hostsfile = File::open(hostspath).unwrap();
     let mut hosts = vec![];
     let mut reader = BufReader::new(&hostsfile);
     let mut line = String::new();
