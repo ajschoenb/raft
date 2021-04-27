@@ -300,6 +300,14 @@ impl<C> Server<C> where C: RaftComms {
         }
     }
 
+    pub fn handle_recv_request_log(&self, id: String, start_idx: usize) {
+        // basically just send back as many entries as we can starting at start_idx
+        let end_idx = start_idx + 9;
+        let entries = (&self.log.get_vec()[start_idx..end_idx]).to_vec();
+        let response = make_request_log_response(end_idx, self.log.len(), entries);
+        self.comms.send(id, response);
+    }
+
     pub fn recv_rpc(&mut self) {
         loop {
             match self.comms.try_recv() {
@@ -346,6 +354,11 @@ impl<C> Server<C> where C: RaftComms {
                     result,
                 })) => {
                     self.handle_recv_append_entries_response(id, term, idx, result);
+                },
+                Some((id, RPC::RequestLog {
+                    start_idx
+                })) => {
+                    self.handle_recv_request_log(id, start_idx);
                 },
                 Some((_, rpc)) => {
                     panic!("server {} got a bad RPC {:?}", self.id, rpc);

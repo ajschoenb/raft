@@ -33,6 +33,14 @@ pub enum RPC {
         opid: i64,
         success: bool,
     },
+    RequestLog {
+        start_idx: usize,
+    },
+    RequestLogResponse {
+        end_idx: usize,
+        log_len: usize,
+        entries: Vec<RaftLogEntry>,
+    },
 }
 
 pub fn make_append_entries(
@@ -100,5 +108,25 @@ pub fn make_client_response(
     RPC::ClientResponse {
         opid: opid,
         success: success,
+    }
+}
+
+pub fn make_request_log(
+    start_idx: usize,
+) -> RPC {
+    RPC::RequestLog {
+        start_idx: start_idx,
+    }
+}
+
+pub fn make_request_log_response(
+    end_idx: usize,
+    log_len: usize,
+    entries: Vec<RaftLogEntry>,
+) -> RPC {
+    RPC::RequestLogResponse {
+        end_idx: end_idx,
+        log_len: log_len,
+        entries: entries,
     }
 }
