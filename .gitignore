@@ -1,3 +1,3 @@
-target/*
-*.swp
-Cargo.lock
+server/target
+*/**.swp
+server/Cargo.lock
