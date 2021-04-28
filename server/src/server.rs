@@ -473,7 +473,10 @@ impl<C> Server<C> where C: RaftComms {
                     // if we're the leader, check to notify a client their request was applied
                     if self.state == ServerState::Leader {
                         match self.client_res.remove(&self.applied_idx) {
-                            Some((i, res)) => self.comms.send(i, res),
+                            Some((i, res)) => {
+                                debug!("server {} sending response for idx {}", self.id, self.applied_idx);
+                                self.comms.send(i, res)
+                            },
                             None => {},
                         }
                     }
