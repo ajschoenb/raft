@@ -47,9 +47,10 @@ fs.readFile('../config/hosts.txt', (err, data) => {
                 let e = entries[i];
                 if (e['applied'] == true) {
                     logData[idx].push(e);
+                    startIdx[idx]++;
                 }
             }
-            startIdx[idx] = obj['RequestLogResponse']['applied_idx'] + 1;
+            // startIdx[idx] = obj['RequestLogResponse']['applied_idx'] + 1;
         } else if (isClientResponse(obj)) {
             if (obj['ClientResponse']['success'] == true && obj['ClientResponse']['opid'] == requestQ.peekFront()) {
                 foundLeader = true;
