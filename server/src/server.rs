@@ -13,8 +13,8 @@ use crate::raftlog::*;
 use crate::comms::RaftComms;
 
 // all measured in ms
-static BASE_ELECT_TIMEOUT: i32 = 150;
-static PING_RATE: i32 = 15;
+static BASE_ELECT_TIMEOUT: i32 = 500;
+static PING_RATE: i32 = 50;
 static CRASH_FREQ: u32 = 60000;
 static CRASH_LENGTH: i32 = 5000;
 
