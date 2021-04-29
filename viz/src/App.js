@@ -1,7 +1,8 @@
 import React from 'react';
+import Button from 'react-bootstrap/Button';
 import './App.css';
 
-class Foo extends React.Component {
+class LogView extends React.Component {
     constructor(props) {
         super(props);
         this.state = {
@@ -21,28 +22,29 @@ class Foo extends React.Component {
     }
 
     tick() {
-        var xhr = new XMLHttpRequest();
-        xhr.addEventListener('load', () => {
-            console.log('loaded');
-            let data = JSON.parse(xhr.responseText);
-            this.setState({
-                data: data,
-            });
-        });
-        xhr.open('GET', 'http://3.23.100.182:3000/state');
-        xhr.send();
+        fetch('https://raftviz.herokuapp.com/state')
+            .then(res => res.json())
+            .then(data => this.setState({data: data}));
     }
 
-    renderData(data) {
-        let dataLen = data.length;
+    renderData(data, idx) {
+        let dataLen = data[idx].length;
         let firstIdx = Math.max(dataLen - 25, 0);
         return (
             <div>
-                <table className="table">
+                <table className="table table-bordered">
                     <tr>
-                        {data.slice(firstIdx).map(e => {
+                        <th>Server {idx}</th>
+                        <th>
+                            Term
+                            <br />
+                            Opid
+                        </th>
+                        {data[idx].slice(firstIdx).map(e => {
                             return (
                                 <td>
+                                    {e['term']}
+                                    <br />
                                     {e['opid']}
                                 </td>
                             );
@@ -56,11 +58,11 @@ class Foo extends React.Component {
     render() {
         return (
             <div>
-                {this.renderData(this.state.data[0])}
-                {this.renderData(this.state.data[1])}
-                {this.renderData(this.state.data[2])}
-                {this.renderData(this.state.data[3])}
-                {this.renderData(this.state.data[4])}
+                {this.renderData(this.state.data, 0)}
+                {this.renderData(this.state.data, 1)}
+                {this.renderData(this.state.data, 2)}
+                {this.renderData(this.state.data, 3)}
+                {this.renderData(this.state.data, 4)}
             </div>
         );
     }
@@ -68,23 +70,23 @@ class Foo extends React.Component {
 
 class RequestButton extends React.Component {
     request() {
-        var xhr = new XMLHttpRequest();
-        xhr.open('POST', 'http://3.23.100.182:3000/request');
-        xhr.send();
+        fetch('https://raftviz.herokuapp.com/request', {method:'POST'});
     }
 
     render() {
         return (
-            <input type="button" value="Request" onClick={this.request} />
+            <Button size="lg" onClick={this.request}>Make a Request</Button>
         );
     }
 }
 
 function App() {
   return (
-      <div>
-          <Foo />
-          <RequestButton />
+      <div style={{margin: '25px'}}>
+          <center>
+              <LogView />
+              <RequestButton />
+          </center>
       </div>
   );
 }
