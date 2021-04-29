@@ -113,6 +113,7 @@ fs.readFile('./hosts.txt', (err, data) => {
             logData[i] = [];
             startIdx[i] = 0;
         }
+        reqno = 0;
         res.redirect('/');
     });
 
