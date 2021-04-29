@@ -39,6 +39,7 @@ pub enum RPC {
     RequestLogResponse {
         end_idx: usize,
         log_len: usize,
+        applied_idx: usize,
         entries: Vec<RaftLogEntry>,
     },
 }
@@ -122,11 +123,13 @@ pub fn make_request_log(
 pub fn make_request_log_response(
     end_idx: usize,
     log_len: usize,
+    applied_idx: usize,
     entries: Vec<RaftLogEntry>,
 ) -> RPC {
     RPC::RequestLogResponse {
         end_idx: end_idx,
         log_len: log_len,
+        applied_idx: applied_idx,
         entries: entries,
     }
 }

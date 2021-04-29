@@ -305,7 +305,7 @@ impl<C> Server<C> where C: RaftComms {
         let start_idx = min(start_idx, self.log.len());
         let end_idx = min(start_idx + 9, self.log.len());
         let entries = (&self.log.get_vec()[start_idx..end_idx]).to_vec();
-        let response = make_request_log_response(end_idx, self.log.len(), entries);
+        let response = make_request_log_response(end_idx, self.log.len(), self.applied_idx, entries);
         self.comms.send(id, response);
     }
 

@@ -61,11 +61,12 @@ impl<C> Client<C> where C: RaftComms {
                 let leader_id = self.s_ids[leader_idx].clone();
                 self.comms.send(leader_id, req.clone());
                 match self.comms.try_recv() {
-                    Some((_, RPC::ClientResponse {
-                        opid: _,
+                    Some((id, RPC::ClientResponse {
+                        opid,
                         success,
                     })) => {
-                        if success {
+                        if success && opid == req_opid {
+                            debug!("client {} recved response from {} opid {}", self.id, id, opid);
                             n += 1;
                             break;
                         } else {
