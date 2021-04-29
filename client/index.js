@@ -19,7 +19,7 @@ let logData = [];
 let startIdx = [];
 
 const fs = require('fs');
-fs.readFile('../config/hosts_client.txt', (err, data) => {
+fs.readFile('../config/hosts.txt', (err, data) => {
     if (err) throw err;
     data = data.toString('utf8').trim().split('\n');
     data.forEach(d => {
