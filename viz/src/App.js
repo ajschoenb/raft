@@ -42,7 +42,7 @@ class LogView extends React.Component {
                         </th>
                         {data[idx].slice(firstIdx).map(e => {
                             return (
-                                <td>
+                                <td className="tdentry">
                                     {e['term']}
                                     <br />
                                     {e['opid']}

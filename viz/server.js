@@ -1,4 +1,5 @@
 const express = require('express');
+const favicon = require('express-favicon');
 const cors = require('cors');
 const path = require('path');
 const app = express();
@@ -7,6 +8,7 @@ const port = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.static(__dirname));
 app.use(express.static(path.join(__dirname, 'build')));
+app.use(favicon(__dirname + '/build/favicon.ico'));
 
 const dgram = require('dgram');
 const socket = dgram.createSocket('udp4');
@@ -51,9 +53,9 @@ fs.readFile('./hosts.txt', (err, data) => {
                 if (e['applied'] == true) {
                     logData[idx].push(e);
                     startIdx[idx]++;
+                    reqno = Math.max(reqno, e['opid']);
                 }
             }
-            // startIdx[idx] = obj['RequestLogResponse']['applied_idx'] + 1;
         } else if (isClientResponse(obj)) {
             if (obj['ClientResponse']['success'] == true && obj['ClientResponse']['opid'] == requestQ.peekFront()) {
                 foundLeader = true;
@@ -101,10 +103,17 @@ fs.readFile('./hosts.txt', (err, data) => {
     });
 
     app.post('/request', (req, res) => {
-        console.log('making request');
         reqno++;
         requestQ.push(reqno);
         res.send('request sent');
+    });
+
+    app.get('/refresh', (req, res) => {
+        for (var i in hosts) {
+            logData[i] = [];
+            startIdx[i] = 0;
+        }
+        res.redirect('/');
     });
 
     app.listen(port, () => {
