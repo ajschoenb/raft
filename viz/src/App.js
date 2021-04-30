@@ -29,7 +29,7 @@ class LogView extends React.Component {
 
     renderData(data, idx) {
         let dataLen = data[idx].length;
-        let firstIdx = Math.max(dataLen - 25, 0);
+        let firstIdx = Math.max(dataLen - 20, 0);
         return (
             <div>
                 <table className="table table-bordered">
