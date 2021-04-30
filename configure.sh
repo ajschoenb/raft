@@ -6,3 +6,4 @@ mkdir -p ~/raft
 echo "Copying hosts.txt..."
 cp config/hosts.txt ~/raft
 cp config/hosts_client.txt ~/raft
+cp config/hosts_client.txt viz/hosts.txt
