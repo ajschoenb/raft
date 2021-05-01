@@ -13,8 +13,8 @@ use crate::raftlog::*;
 use crate::comms::RaftComms;
 
 // all measured in ms
-static BASE_ELECT_TIMEOUT: i32 = 500;
-static PING_RATE: i32 = 50;
+static BASE_ELECT_TIMEOUT: i32 = 250;
+static PING_RATE: i32 = 10;
 static CRASH_FREQ: u32 = 60000;
 static CRASH_LENGTH: i32 = 5000;
 
@@ -136,7 +136,7 @@ impl<C> Server<C> where C: RaftComms {
             next_idx: HashMap::new(),
             match_idx: HashMap::new(),
             client_res: HashMap::new(),
-            elect_timeout: thread_rng().gen_range(BASE_ELECT_TIMEOUT..2 * BASE_ELECT_TIMEOUT),
+            elect_timeout: thread_rng().gen_range(BASE_ELECT_TIMEOUT..4 * BASE_ELECT_TIMEOUT),
             elect_timer: 0,
             crashed: false,
             crash_timer: 0,
