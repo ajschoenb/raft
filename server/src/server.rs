@@ -110,7 +110,7 @@ impl<C> Server<C> where C: RaftComms {
             id: id,
             curr_term: 0,
             vote: String::new(),
-            log: RaftLog::new(lpath),
+            log: RaftLog::from_file(lpath),
             running: running.clone(),
             state: ServerState::Follower,
             commit_idx: 0,
