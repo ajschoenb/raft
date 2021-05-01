@@ -1,12 +1,15 @@
 import React from 'react';
 import Button from 'react-bootstrap/Button';
+import Container from 'react-bootstrap/Container';
+import Table from 'react-bootstrap/Table';
 import './App.css';
 
 class LogView extends React.Component {
     constructor(props) {
         super(props);
         this.state = {
-            data: [[],[],[],[],[]],
+            logs: [[],[],[],[],[]],
+            statuses: ['follower','follower','follower','follower','follower']
         };
     }
 
@@ -24,33 +27,40 @@ class LogView extends React.Component {
     tick() {
         fetch('https://raftviz.herokuapp.com/state')
             .then(res => res.json())
-            .then(data => this.setState({data: data}));
+            .then(data => this.setState({logs: data.logs, statuses: data.statuses}));
     }
 
-    renderData(data, idx) {
-        let dataLen = data[idx].length;
-        let firstIdx = Math.max(dataLen - 20, 0);
+    renderData(idx) {
+        let logs = this.state.logs;
+        let statuses = this.state.statuses;
+        let logsLen = logs[idx].length;
+        let firstIdx = Math.max(logsLen - 20, 0);
         return (
             <div>
-                <table className="table table-bordered">
+                <Table bordered variant="dark">
                     <tr>
                         <th>Server {idx}</th>
-                        <th>
-                            Term
-                            <br />
-                            Opid
-                        </th>
-                        {data[idx].slice(firstIdx).map(e => {
-                            return (
-                                <td className="tdentry">
-                                    {e['term']}
-                                    <br />
-                                    {e['opid']}
-                                </td>
-                            );
+                        <th>Term</th>
+                        {logs[idx].slice(firstIdx).map(e => {
+                            return (<td className="tdentry">{e['term']}</td>);
                         })}
                     </tr>
-                </table>
+                    <tr>
+                        {statuses[idx] === 'Crashed' &&
+                            <th style={{'color': 'Tomato'}}>Crashed</th>
+                        }
+                        {statuses[idx] === 'Follower' &&
+                            <th style={{'color': 'LightGreen'}}>Follower</th>
+                        }
+                        {statuses[idx] === 'Leader' &&
+                            <th style={{'color': 'Plum'}}>Leader</th>
+                        }
+                        <th>Opid</th>
+                        {logs[idx].slice(firstIdx).map(e => {
+                            return (<td className="tdentry">{e['opid']}</td>);
+                        })}
+                    </tr>
+                </Table>
             </div>
         );
     }
@@ -58,11 +68,11 @@ class LogView extends React.Component {
     render() {
         return (
             <div>
-                {this.renderData(this.state.data, 0)}
-                {this.renderData(this.state.data, 1)}
-                {this.renderData(this.state.data, 2)}
-                {this.renderData(this.state.data, 3)}
-                {this.renderData(this.state.data, 4)}
+                {this.renderData(0)}
+                {this.renderData(1)}
+                {this.renderData(2)}
+                {this.renderData(3)}
+                {this.renderData(4)}
             </div>
         );
     }
@@ -81,14 +91,16 @@ class RequestButton extends React.Component {
 }
 
 function App() {
-  return (
-      <div style={{margin: '25px'}}>
-          <center>
-              <LogView />
-              <RequestButton />
-          </center>
-      </div>
-  );
+    return (
+        <div style={{margin: '25px'}}>
+            <Container fluid>
+                <center>
+                    <LogView />
+                    <RequestButton />
+                </center>
+            </Container>
+        </div>
+    );
 }
 
 export default App;

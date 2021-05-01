@@ -21,6 +21,8 @@ let hosts = [];
 let hostIdx = 0;
 let foundLeader = false;
 let logData = []; 
+let hostStatus = [];
+let hostTimer = [];
 let startIdx = [];
 
 const fs = require('fs');
@@ -31,6 +33,8 @@ fs.readFile('./hosts.txt', (err, data) => {
         d = d.split(':');
         hosts.push({'addr':d[0], 'port':d[1]});
         logData.push([]);
+        hostStatus.push('Follower');
+        hostTimer.push(0);
         startIdx.push(0);
     });
 
@@ -44,9 +48,11 @@ fs.readFile('./hosts.txt', (err, data) => {
 
     socket.on('message', (msg, rinfo) => {
         let obj = JSON.parse(msg);
+        let host = {'addr':rinfo.address, 'port':`${rinfo.port}`};
+        let idx = hosts.findIndex(h => JSON.stringify(h) == JSON.stringify(host));
+        hostTimer[idx] = 0;
+        if (hostStatus[idx] == 'Crashed') hostStatus[idx] = 'Follower';
         if (isRequestLogResponse(obj)) {
-            let host = {'addr':rinfo.address, 'port':`${rinfo.port}`};
-            let idx = hosts.findIndex(h => JSON.stringify(h) == JSON.stringify(host));
             let entries = obj['RequestLogResponse']['entries'];
             for (var i in entries) {
                 let e = entries[i];
@@ -59,6 +65,7 @@ fs.readFile('./hosts.txt', (err, data) => {
         } else if (isClientResponse(obj)) {
             if (obj['ClientResponse']['success'] == true && obj['ClientResponse']['opid'] == requestQ.peekFront()) {
                 foundLeader = true;
+                hostStatus[idx] = 'Leader';
                 requestQ.shift();
             } else {
                 foundLeader = false;
@@ -85,6 +92,15 @@ fs.readFile('./hosts.txt', (err, data) => {
                 socket.send(`{"ClientRequest":{"opid":${requestQ.peekFront()}}}`, hosts[hostIdx]['port'], hosts[hostIdx]['addr']);
             }
         }, 100);
+
+        setInterval(() => {
+            for (var i in hosts) {
+                hostTimer[i]++;
+                if (hostTimer[i] == 100) {
+                    hostStatus[i] = 'Crashed';
+                }
+            }
+        }, 10);
     });
 
     socket.on('error', (err) => {
@@ -99,7 +115,7 @@ fs.readFile('./hosts.txt', (err, data) => {
     });
 
     app.get('/state', (req, res) => {
-        res.send(logData);
+        res.send({logs: logData, statuses: hostStatus});
     });
 
     app.post('/request', (req, res) => {
@@ -111,6 +127,8 @@ fs.readFile('./hosts.txt', (err, data) => {
     app.get('/refresh', (req, res) => {
         for (var i in hosts) {
             logData[i] = [];
+            hostStatus[i] = 'Follower';
+            hostTimer[i] = 0;
             startIdx[i] = 0;
         }
         reqno = 0;
