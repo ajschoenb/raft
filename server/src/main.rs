@@ -205,7 +205,7 @@ fn run_dist(opts: Opts, logpathbase: String) {
         let mut server = Server::new(
             addr.clone(),
             &running,
-            format!("{}/{}.log", logpathbase, addr),
+            format!("{}/server.log", logpathbase),
             hosts,
             RaftSocketComms::new(socket),
         );
