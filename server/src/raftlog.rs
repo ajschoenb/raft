@@ -2,7 +2,7 @@ extern crate serde;
 extern crate serde_json;
 extern crate shellexpand;
 use std::sync::{Arc, Mutex};
-use std::fs::File;
+use std::fs::{OpenOptions, File};
 use std::io::BufReader;
 use std::io::prelude::*;
 
@@ -52,7 +52,11 @@ impl RaftLog {
     pub fn from_file(path: String) -> RaftLog {
         let mut log = vec![RaftLogEntry::new(0, 0)];
         let _path = path.clone();
-        let lfile = File::open(path).unwrap();
+        let lfile = OpenOptions::new()
+                    .read(true)
+                    .append(true)
+                    .create(true)
+                    .open(path).unwrap();
         let mut reader = BufReader::new(&lfile);
         let mut line = String::new();
         let mut len = reader.read_line(&mut line).unwrap();

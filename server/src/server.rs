@@ -18,6 +18,22 @@ static PING_RATE: i32 = 50;
 static CRASH_FREQ: u32 = 60000;
 static CRASH_LENGTH: i32 = 5000;
 
+fn bin_search<F>(min: usize, max: usize, pred: F) -> usize
+    where F: Fn(usize) -> bool
+{
+    let mut l = min;
+    let mut r = max;
+    while l <= r {
+        let m: usize = (l + r) / 2;
+        if pred(m) {
+            l = m + 1;
+        } else {
+            r = m - 1;
+        }
+    }
+    r
+}
+
 ///
 /// ServerState
 /// enum for server state machine
@@ -303,9 +319,13 @@ impl<C> Server<C> where C: RaftComms {
     pub fn handle_recv_request_log(&self, id: String, start_idx: usize) {
         // basically just send back as many entries as we can starting at start_idx
         let start_idx = min(start_idx, self.log.len());
-        let end_idx = min(start_idx + 9, self.log.len());
+        let end_idx = bin_search(start_idx, self.log.len(), |idx| {
+            let e = (&self.log.get_vec()[start_idx..idx]).to_vec();
+            let r = make_request_log_response(idx, self.log.len(), e);
+            serde_json::to_string(&r).unwrap().len() < 576
+        });
         let entries = (&self.log.get_vec()[start_idx..end_idx]).to_vec();
-        let response = make_request_log_response(end_idx, self.log.len(), self.applied_idx, entries);
+        let response = make_request_log_response(end_idx, self.log.len(), entries);
         self.comms.send(id, response);
     }
 
@@ -395,7 +415,11 @@ impl<C> Server<C> where C: RaftComms {
                 if self.log.len() - 1 >= self.next_idx[id] {
                     let prev_idx = self.next_idx[id] - 1;
                     let prev_term = self.log.get(prev_idx).unwrap().term;
-                    let last_idx = min(self.log.len(), prev_idx + 9);
+                    let last_idx = bin_search(prev_idx + 1, self.log.len(), |idx| {
+                        let e = (&self.log.get_vec()[prev_idx + 1..idx]).to_vec();
+                        let r = make_append_entries(self.curr_term, prev_idx, prev_term, e, self.commit_idx);
+                        serde_json::to_string(&r).unwrap().len() < 576
+                    });
                     let entries = (&self.log.get_vec()[prev_idx + 1..last_idx]).to_vec();
                     debug!("server {} sending {} {} entries to commit starting at {}", self.id, id, entries.len(), prev_idx + 1);
                     rpc = make_append_entries(self.curr_term, prev_idx, prev_term, entries, self.commit_idx);
