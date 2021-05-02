@@ -24,10 +24,10 @@ class LogView extends React.Component {
         clearInterval(this.timer);
     }
 
-    tick() {
-        fetch('https://raftviz.herokuapp.com/state')
-            .then(res => res.json())
-            .then(data => this.setState({logs: data.logs, statuses: data.statuses}));
+    async tick() {
+        let res = await fetch('/state');
+        let data = await res.json();
+        this.setState({logs: data.logs, statuses: data.statuses});
     }
 
     renderData(idx) {
@@ -80,7 +80,7 @@ class LogView extends React.Component {
 
 class RequestButton extends React.Component {
     request() {
-        fetch('https://raftviz.herokuapp.com/request', {method:'POST'});
+        fetch('/request', {method:'POST'});
     }
 
     render() {
