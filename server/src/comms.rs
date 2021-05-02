@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::sync::mpsc::{Sender, Receiver};
 use std::net::UdpSocket;
+use std::time::{Instant, Duration};
 use std::str;
 
 use crate::rpc::RPC;
@@ -8,6 +9,16 @@ use crate::rpc::RPC;
 pub trait RaftComms {
     fn send(&self, addr: String, rpc: RPC);
     fn try_recv(&self) -> Option<(String, RPC)>;
+    fn recv_timeout(&self, dur: Duration) -> Option<(String, RPC)> {
+        let now = Instant::now();
+        while now.elapsed() < dur {
+            match self.try_recv() {
+                Some(res) => return Some(res),
+                None => {},
+            }
+        }
+        return None;
+    }
 }
 
 pub struct RaftChannelComms {

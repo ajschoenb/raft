@@ -60,7 +60,7 @@ impl<C> Client<C> where C: RaftComms {
             while self.is_running() {
                 let leader_id = self.s_ids[leader_idx].clone();
                 self.comms.send(leader_id, req.clone());
-                match self.comms.try_recv() {
+                match self.comms.recv_timeout(Duration::from_millis(100)) {
                     Some((id, RPC::ClientResponse {
                         opid,
                         success,
@@ -75,7 +75,7 @@ impl<C> Client<C> where C: RaftComms {
                         }
                     },
                     Some((_, rpc)) => panic!("client {} recved a bad RPC {:?}", self.id, rpc),
-                    None => thread::sleep(Duration::from_millis(100)),
+                    None => {},
                 }
             }
             info!("client {} recved response for req {}, opid {}", self.id, n, req_opid);
