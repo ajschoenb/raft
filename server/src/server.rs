@@ -43,6 +43,7 @@ pub enum ServerState {
     Follower,
     Candidate,
     Leader,
+    Crashed,
 }
 
 ///
@@ -100,9 +101,6 @@ pub struct Server<C: RaftComms> {
     // election timer, in ms
     elect_timer: i32,
 
-    // if the server is currently crashed
-    crashed: bool,
-
     // crash timer, in ms
     crash_timer: i32,
 
@@ -138,7 +136,6 @@ impl<C> Server<C> where C: RaftComms {
             client_res: HashMap::new(),
             elect_timeout: thread_rng().gen_range(BASE_ELECT_TIMEOUT..4 * BASE_ELECT_TIMEOUT),
             elect_timer: 0,
-            crashed: false,
             crash_timer: 0,
             server_ids: server_ids,
             comms: comms,
@@ -449,7 +446,7 @@ impl<C> Server<C> where C: RaftComms {
     }
 
     pub fn crash(&mut self) {
-        self.crashed = true;
+        self.state = ServerState::Crashed;
         self.crash_timer = 0;
     }
 
@@ -467,7 +464,6 @@ impl<C> Server<C> where C: RaftComms {
         if self.crash_timer == CRASH_LENGTH {
             info!("server {} uncrashing", self.id);
             self.become_follower();
-            self.crashed = false;
         }
     }
 
@@ -480,46 +476,48 @@ impl<C> Server<C> where C: RaftComms {
         //      send messages to other servers as needed
         // }
         while self.is_running() {
-            if self.crashed {
-                self.tick_crashed();
-            } else {
-                // check for random crash
-                if self.should_crash() {
-                    info!("server {} crashing", self.id);
-                    self.crash();
-                }
+            match self.state {
+                ServerState::Crashed => self.tick_crashed(),
+                state => {
+                    // check for random crash
+                    if self.should_crash() {
+                        info!("server {} crashing", self.id);
+                        self.crash();
+                    }
 
-                // if commit_idx > applied_idx, increment applied_idx and apply log[applied_idx]
-                while self.commit_idx > self.applied_idx {
-                    self.applied_idx += 1;
-                    self.log.apply(self.applied_idx);
+                    // if commit_idx > applied_idx, increment applied_idx and apply log[applied_idx]
+                    while self.commit_idx > self.applied_idx {
+                        self.applied_idx += 1;
+                        self.log.apply(self.applied_idx);
 
-                    // if we're the leader, check to notify a client their request was applied
-                    if self.state == ServerState::Leader {
-                        match self.client_res.remove(&self.applied_idx) {
-                            Some((i, res)) => {
-                                debug!("server {} sending response for idx {}", self.id, self.applied_idx);
-                                self.comms.send(i, res)
-                            },
-                            None => {},
+                        // if we're the leader, check to notify a client their request was applied
+                        if self.state == ServerState::Leader {
+                            match self.client_res.remove(&self.applied_idx) {
+                                Some((i, res)) => {
+                                    debug!("server {} sending response for idx {}", self.id, self.applied_idx);
+                                    self.comms.send(i, res)
+                                },
+                                None => {},
+                            }
                         }
                     }
-                }
 
-                // check for election timeout
-                self.elect_timer += 1;
-                if self.elect_timer >= self.elect_timeout {
-                    self.become_candidate();
-                }
+                    // check for election timeout
+                    self.elect_timer += 1;
+                    if self.elect_timer >= self.elect_timeout {
+                        self.become_candidate();
+                    }
 
-                // receive and respond to incoming RPCs
-                self.recv_rpc();
+                    // receive and respond to incoming RPCs
+                    self.recv_rpc();
 
-                // tick based on state
-                match self.state {
-                    ServerState::Follower => self.tick_follower(),
-                    ServerState::Candidate => self.tick_candidate(),
-                    ServerState::Leader => self.tick_leader(),
+                    // tick based on state
+                    match state {
+                        ServerState::Follower => self.tick_follower(),
+                        ServerState::Candidate => self.tick_candidate(),
+                        ServerState::Leader => self.tick_leader(),
+                        ServerState::Crashed => panic!("didn't crash while crashed"),
+                    }
                 }
             }
 
