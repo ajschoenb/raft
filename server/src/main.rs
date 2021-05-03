@@ -216,7 +216,7 @@ fn run_dist(opts: Opts, logpathbase: String) {
 fn clean(path: String) {
     for p in fs::read_dir(path).unwrap() {
         let p = p.unwrap().path();
-        if !p.to_string_lossy().into_owned().ends_with("hosts.txt") {
+        if p.to_string_lossy().into_owned().ends_with(".log") {
             fs::remove_file(p).unwrap();
         }
     }
