@@ -1,0 +1,9 @@
+Build Instructions:
+Run ./configure.sh to create the ~/raft directory and setup the hosts.txt
+Raft - run "cargo build" in the server/ directory
+RaftViz - run "npm run build; npm start" in the viz/ directory
+
+If you want to actually use the distributed implementation, or RaftViz (which assumes you are), go into config/hosts.txt and config/hosts_client.txt and update it with your server IPs. hosts.txt is the addresses the servers identify themselves and each other as, and hosts_client.txt is the external addresses (if these are different, as they were for AWS). There's a sample configuration for AWS, and another for UTCS lab machines (with hostnames annotated so you know where to SSH). Note that as far as I know, you can't run the distributed version as separate processes on the same host because the OS doesn't do a good job of preventing multiple servers from obtaining the same UDP socket.
+
+I referred frequently to the original Raft paper by Ongaro et al. both for understanding the protocol and implementation suggestions.
+https://raft.github.io/raft.pdf
